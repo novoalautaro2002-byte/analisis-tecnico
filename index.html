@@ -563,6 +563,7 @@ tbody tr.clk{cursor:pointer}
           <div class="vlab">Lectura técnica del sistema</div>
           <div class="vreco" id="v-reco">SIN DATOS</div>
           <div class="vscore" id="v-score">score —</div>
+          <div id="v-score-calib" style="display:none"></div>
           <div class="gauge">
             <div class="gauge-mid"></div>
             <div class="gauge-fill" id="v-gauge"></div>
@@ -808,6 +809,12 @@ tbody tr.clk{cursor:pointer}
         <option value="10">10 ruedas</option>
         <option value="20" selected>20 ruedas</option>
       </select></div>
+    <div class="fld"><label>Costo ida y vuelta (pb)</label>
+      <input type="number" id="i-bt-costo" value="15" min="0" step="1" style="width:64px"
+             title="Spread + comisión de entrar y salir, en puntos básicos. Se resta de cada trade, no de la referencia pasiva."></div>
+    <div class="fld"><label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="i-bt-wf" checked style="width:auto">Walk-forward</label>
+      <span style="font-size:9px;color:var(--text4);max-width:150px;line-height:1.3">calibra con el pasado, evalúa el año siguiente, repite</span></div>
     <button class="btn" id="b-bt">Correr backtest</button>
     <div class="tb-spacer"></div>
     <span class="pill" id="bt-pill">—</span>
@@ -818,6 +825,24 @@ tbody tr.clk{cursor:pointer}
       <div class="vlab">¿El score tiene filo?</div>
       <div class="vreco" id="bt-vtxt">—</div>
       <div class="vscore" id="bt-vsub"></div>
+    </div>
+  </div>
+
+  <div class="card" id="bt-comparacion" style="display:none;margin-bottom:13px">
+    <div class="card-h"><div class="card-t"><span>⚖</span> Pesos a mano vs. pesos calibrados</div>
+      <span class="pill" id="bt-comp-pill">—</span></div>
+    <div class="card-b" style="padding:12px 14px">
+      <div id="bt-comp-resumen" style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div style="font-size:10.5px;color:var(--text4);line-height:1.5;margin-bottom:8px">
+        Calibrado = shrinkage James-Stein sobre la ventaja de cada señal medida SÓLO con datos previos al
+        período que se evalúa (λ=300: con poca muestra el peso de esa señal colapsa hacia 0). Manual = los
+        pesos puestos a mano en el motor. Si "calibrado" no le gana a "manual", los pesos a mano no estaban
+        aportando nada que los datos puedan confirmar.
+      </div>
+      <div class="tbl-scroll"><table id="t-bt-ventanas"><thead><tr>
+        <th>Ventana evaluada</th><th class="r">Casos</th><th class="r">Manual</th><th class="r">t manual</th>
+        <th class="r">Calibrado</th><th class="r">t calibrado</th>
+      </tr></thead><tbody></tbody></table></div>
     </div>
   </div>
 
@@ -3483,6 +3508,34 @@ function pintarCurso(meta){
     : 'Las señales incluyen la rueda en formación y pueden cambiar hasta el cierre. El volumen se proyecta a rueda completa.';
 }
 
+/**
+ * Score MANUAL (pesos a mano, el de siempre) vs score CALIBRADO (pesos con
+ * shrinkage, salidos de "Correr backtest" en la pestaña Backtest). Sin correr
+ * un backtest todavía no hay nada guardado y esta caja no se muestra.
+ */
+function renderScoreCalibrado(signals, scoreManual){
+  const el = $('#v-score-calib');
+  let guardado = null;
+  try{ guardado = JSON.parse(localStorage.getItem('at-pesos-calibrados') || 'null'); }catch(e){}
+  if(!guardado || !guardado.pesos){ el.style.display = 'none'; return; }
+
+  const scoreCal = scoreConPesos(signals, guardado.pesos);
+  const dias = Math.round((Date.now() - new Date(guardado.fecha).getTime()) / 86400000);
+  el.style.display = 'block';
+  el.innerHTML =
+    '<div style="margin-top:6px;padding:8px 10px;border-radius:8px;background:var(--bg3);' +
+    'border:1px solid var(--border);display:flex;gap:14px;align-items:center;flex-wrap:wrap">' +
+      '<div><span style="font-size:9px;color:var(--text4);text-transform:uppercase">manual</span><br>' +
+        '<b style="font-size:15px">' + (scoreManual>0?'+':'') + scoreManual + '</b></div>' +
+      '<div><span style="font-size:9px;color:var(--text4);text-transform:uppercase">calibrado</span><br>' +
+        '<b style="font-size:15px" class="' + cls(scoreCal) + '">' + (scoreCal>0?'+':'') + scoreCal + '</b></div>' +
+      '<div style="font-size:10px;color:var(--text4);line-height:1.4;flex:1;min-width:140px">' +
+        (guardado.confiable ? 'walk-forward · ' : '<span style="color:var(--warn)">sin walk-forward, cota optimista · </span>') +
+        'calibrado hace ' + dias + (dias===1?' día':' días') + ' (' + esc(guardado.universo||'') + ', H=' + guardado.H + ')' +
+      '</div>' +
+    '</div>';
+}
+
 function renderVerdict(v, score, signals){
   const el = $('#verdict');
   el.className = 'verdict ' + v.k;
@@ -3499,6 +3552,7 @@ function renderVerdict(v, score, signals){
   if(REG.estado && REG.estado.nivel === 'mal' && v.dir > 0)
     notas += '<div style="margin-top:6px;font-size:10.5px;color:var(--warn);font-family:var(--font);line-height:1.5">⚠ Mercado en RIESGO (' + esc(REG.estado.detalle) + ')</div>';
   $('#v-score').innerHTML = 'score ' + (score > 0 ? '+' : '') + score + ' / 100 · ' + signals.length + ' señales' + notas;
+  renderScoreCalibrado(signals, score);
   const g = $('#v-gauge');
   const half = Math.abs(score) / 2;
   if(score >= 0){ g.style.left = '50%'; g.style.right = 'auto'; g.style.width = half + '%'; g.style.background = 'linear-gradient(90deg,rgba(34,214,138,.5),var(--up))'; }
@@ -4378,7 +4432,11 @@ function desvio(a){
   const m = a.suma / a.n;
   return Math.sqrt(Math.max(0, a.sumaSq / a.n - m*m) * a.n / (a.n - 1));
 }
-/** t de Welch: mide si la diferencia de medias se distingue del ruido */
+/** t de Welch: mide si la diferencia de medias se distingue del ruido.
+    Ya no se usa en el backtest (ver neweyWestT abajo): pooleaba eventos que se
+    solapan y que se disparan el mismo dia en decenas de papeles a la vez,
+    tratando cada uno como una observacion independiente. Se deja por si sirve
+    para otra cosa. */
 function tStat(a, b){
   const ma = media(a), mb = media(b), sa = desvio(a), sb = desvio(b);
   if(!isNum(ma) || !isNum(mb) || !isNum(sa) || !isNum(sb) || !a.n || !b.n) return null;
@@ -4386,73 +4444,276 @@ function tStat(a, b){
   return err > 0 ? (ma - mb) / err : null;
 }
 
+/**
+ * Agrupa observaciones {day, val} por dia calendario y promedia dentro de cada
+ * dia. Devuelve la serie diaria en orden cronologico.
+ *
+ * Por que hace falta: cuando el mercado cae, decenas de papeles disparan la
+ * misma senal el MISMO dia. Contar cada uno como un caso independiente infla
+ * la significancia -- el mismo error que tenia tStat(). Colapsar a un numero
+ * por dia antes de testear es el control correcto (equivalente a medir por
+ * mes en vez de por evento).
+ */
+function clusterPorDia(regs){
+  const m = new Map();
+  for(const r of regs){
+    if(!m.has(r.day)) m.set(r.day, []);
+    m.get(r.day).push(r.val);
+  }
+  return [...m.entries()].sort((a, b) => a[0] - b[0])
+    .map(([, arr]) => arr.reduce((a, b) => a + b, 0) / arr.length);
+}
+
+/**
+ * t de Newey-West (HAC) de una serie diaria contra 0, con autocorrelacion
+ * hasta H-1 lags (ventana de Bartlett). H = horizonte del backtest en ruedas:
+ * como cada observacion es un retorno FORWARD de H ruedas, dos observaciones
+ * separadas por menos de H dias comparten informacion y no son independientes.
+ * Sin este ajuste el error estandar se subestima y la t sale inflada.
+ */
+function neweyWestT(x, H){
+  const n = x.length; if(n < 3) return null;
+  const m = x.reduce((a, b) => a + b, 0) / n;
+  const d = x.map(v => v - m);
+  const L = Math.max(1, H - 1);
+  let v = d.reduce((a, b) => a + b * b, 0) / n;
+  for(let l = 1; l <= L && l < n; l++){
+    let g = 0;
+    for(let i = l; i < n; i++) g += d[i] * d[i - l];
+    g /= n;
+    v += 2 * (1 - l / (L + 1)) * g;
+  }
+  return v > 0 ? m / Math.sqrt(v / n) : null;
+}
+
+/**
+ * Media + t de Newey-West de un array de registros {day, val}: agrupa por día
+ * (clusterPorDia) para no contar eventos simultáneos como independientes, y
+ * corre la HAC sobre esa serie diaria.
+ */
+function statDia(regs, H){
+  if(!regs.length) return { media: null, t: null, dias: 0 };
+  const dias = clusterPorDia(regs);
+  const m = regs.reduce((a, r) => a + r.val, 0) / regs.length;
+  return { media: m, t: neweyWestT(dias, H), dias: dias.length };
+}
+
+const LAMBDA_SHRINK = 300;   // fuerza del encogimiento hacia 0 (James-Stein/empirical Bayes)
+
+/**
+ * Pesos calibrados por evidencia en vez de puestos a mano. Por cada señal,
+ * toma la ventaja medida (stUp.media - stDn.media, ya limpia de mercado y de
+ * costo) y la encoge hacia 0 según cuántos casos la respaldan:
+ *
+ *     w = ventaja * n / (n + λ)
+ *
+ * Con pocos casos, w colapsa a ~0 sin que haya que decidirlo a mano. Si la
+ * ventaja de una señal es NEGATIVA (su lectura "alcista" rindió peor que su
+ * lectura "bajista"), el peso calibrado sale negativo: al aplicarlo en el
+ * score, esa señal empuja para el lado CONTRARIO al que marca. Es la manera
+ * automática de lo que VALIDADAS hacía a mano con `favorable: -1`.
+ */
+function pesosCalibrados(porSenalK, lambda = LAMBDA_SHRINK){
+  const w = {};
+  for(const [k, s] of Object.entries(porSenalK)){
+    const n = (s.up.length + s.dn.length) || 0;
+    const vent = (isNum(s.mu) && isNum(s.md)) ? s.mu - s.md : null;
+    if(!isNum(vent) || n < 5){ w[k] = 0; continue; }
+    w[k] = vent * (n / (n + lambda));
+  }
+  const suma = Object.values(w).reduce((a, b) => a + Math.abs(b), 0) || 1;
+  const escala = 100 / suma;
+  for(const k in w) w[k] *= escala;
+  return w;
+}
+
+/** Recalcula el score de un evento con un set de pesos alternativo, sin volver
+    a correr buildSignals: misma fórmula (raw/Σ|w|*100). pesos=null -> usa el
+    peso propio de cada señal (el puesto a mano), o sea el score de siempre. */
+function scoreConPesos(signals, pesos){
+  let raw = 0, wSum = 0;
+  signals.forEach(s => {
+    const w = (pesos && isNum(pesos[s.k])) ? pesos[s.k] : s.w;
+    raw += s.state * w;
+    wSum += Math.abs(w);
+  });
+  return wSum ? clamp(Math.round(raw / wSum * 100), -100, 100) : 0;
+}
+
+/**
+ * Evalúa una ventana: calibra pesos con `eventosCal` (sólo pasado) y mide el
+ * resultado de aplicarlos sobre `eventosEval` (el período de afuera). Cuando
+ * eventosCal === eventosEval es el modo "simple" (una sola partición, sin
+ * walk-forward) -- entonces los pesos SÍ están viendo los mismos datos que se
+ * evalúan, y el resultado hay que leerlo como eso: una cota optimista.
+ */
+function evaluarVentana(eventosCal, eventosEval, CATS){
+  const porSenalK = {};
+  eventosCal.forEach(e => {
+    e.signals.forEach(sg => {
+      if(!sg.state) return;
+      const k = porSenalK[sg.k] = porSenalK[sg.k] || { up: [], dn: [] };
+      (sg.state > 0 ? k.up : k.dn).push({ day: e.day, val: e.exceso });
+    });
+  });
+  const porSenalStats = {};
+  Object.keys(porSenalK).forEach(k => {
+    const s = porSenalK[k];
+    porSenalStats[k] = { up: s.up, dn: s.dn,
+      mu: s.up.length ? s.up.reduce((a, r) => a + r.val, 0) / s.up.length : null,
+      md: s.dn.length ? s.dn.reduce((a, r) => a + r.val, 0) / s.dn.length : null };
+  });
+  const pesos = pesosCalibrados(porSenalStats);
+
+  const regsCatManual = {}; CATS.forEach(c => regsCatManual[c] = []);
+  const regsCatCalibrado = {}; CATS.forEach(c => regsCatCalibrado[c] = []);
+  eventosEval.forEach(e => {
+    regsCatManual[e.catManual].push({ day: e.day, val: e.exceso });
+    const scoreCal = scoreConPesos(e.signals, pesos);
+    regsCatCalibrado[veredicto(scoreCal).txt].push({ day: e.day, val: e.exceso });
+  });
+
+  return { pesos, porSenalStats, regsCatManual, regsCatCalibrado };
+}
+
+/**
+ * Walk-forward: calibra con los primeros 3 años, evalúa el año siguiente,
+ * incorpora ese año a la calibración, avanza. Cada ventana de evaluación es
+ * ajena a los pesos que la evaluaron (los pesos sólo vieron el pasado de esa
+ * ventana) -- es la diferencia real entre "backtesteo" y "lo hubiera operado".
+ */
+function walkForward(eventos, CATS, diaMin, diaMax){
+  const ANIO = 365, CAL_INICIAL = 3 * ANIO;
+  const ventanas = [];
+  let corte = diaMin + CAL_INICIAL;
+  while(corte + ANIO <= diaMax){ ventanas.push({ finCal: corte, finEval: corte + ANIO }); corte += ANIO; }
+  if(!ventanas.length) return null;   // no alcanza la historia: se cae al modo simple
+
+  const porVentana = ventanas.map(v => {
+    const cal = eventos.filter(e => e.day < v.finCal);
+    const ev  = eventos.filter(e => e.day >= v.finCal && e.day < v.finEval);
+    if(cal.length < 200 || ev.length < 30) return null;
+    return { ...v, ...evaluarVentana(cal, ev, CATS), nCal: cal.length, nEval: ev.length };
+  }).filter(Boolean);
+  if(!porVentana.length) return null;
+
+  const regsCatManual = {}; CATS.forEach(c => regsCatManual[c] = []);
+  const regsCatCalibrado = {}; CATS.forEach(c => regsCatCalibrado[c] = []);
+  porVentana.forEach(v => CATS.forEach(c => {
+    regsCatManual[c] = regsCatManual[c].concat(v.regsCatManual[c]);
+    regsCatCalibrado[c] = regsCatCalibrado[c].concat(v.regsCatCalibrado[c]);
+  }));
+
+  const pesosVigentes = porVentana[porVentana.length - 1].pesos;
+
+  return { porVentana, regsCatManual, regsCatCalibrado, pesosVigentes };
+}
+
 async function runBacktest(){
   if(BT.corriendo) return;
   BT.corriendo = true;
   const uk = $('#i-univ-b').value, u = UNIVERSOS[uk];
   const rango = $('#i-bt-rango').value, H = parseInt($('#i-bt-h').value, 10);
+  // costo de ida y vuelta en pb -> % (ej. 15 pb = 0.15%)
+  const costoRT = (parseFloat($('#i-bt-costo')?.value) || 0) / 100;
+  const wf = !!$('#i-bt-wf')?.checked;
   const btn = $('#b-bt'), pb = $('#bt-prog');
   btn.disabled = true; btn.textContent = 'Corriendo…';
   $('#t-bt-cat tbody').innerHTML = '<tr><td colspan="7" class="empty"><div class="spin" style="margin:0 auto 10px"></div>Descargando historia…</td></tr>';
 
   const CATS = ['COMPRA FUERTE','COMPRA','NEUTRAL','VENTA','VENTA FUERTE'];
-  const porCat = {}; CATS.forEach(c => porCat[c] = acum());
-  const porSenal = {};
-  const base = acum();
   let evaluaciones = 0, papeles = 0;
 
   try{
     const syms = u.tickers.map(t => t[0]);
     const res = await pool(syms, x => getBars(x, '1d', rango), CONCURRENCY,
-      (d, t) => { pb.style.width = (d/t*35) + '%'; });
+      (d, t) => { pb.style.width = (d/t*30) + '%'; });
     const series = res.filter(r => r.ok).map(r => r.value).filter(b => b.c.length > 240 + H);
     if(!series.length) throw new Error('sin historia suficiente para backtestear');
+
+    // Pase 1: recolectar cada evento CRUDO (sin restar nada todavía). Se
+    // conserva la optimización de v12: indicadores y pivotes UNA vez por
+    // papel (computeSeries/pivotesPre), snapshot O(1) por rueda -- no se
+    // vuelve a recortar y recalcular la serie en cada paso del bucle.
+    const eventos = [];               // { day, fwd, signals }
+    const fwdPorDia = new Map();      // day -> [fwd, fwd, ...]  (crudo, de TODO el universo)
+    let diaMin = Infinity, diaMax = -Infinity;
 
     for(let si = 0; si < series.length; si++){
       const B = series[si], n = B.c.length;
       papeles++;
-      // Indicadores y pivotes se calculan UNA vez por papel, no una vez por rueda.
-      // Todos son causales, así que leer la posición i de la serie entera da el mismo
-      // número que recalcular sobre la serie recortada hasta i — sin esto el backtest
-      // rehacía RSI, MACD, ADX y Koncorde desde la barra 0 en cada uno de los ~1.000
-      // pasos y tardaba once segundos por papel.
       const A = computeSeries(B), pre = pivotesPre(B);
       for(let i = 220; i < n - H; i++){
         // Corte estricto: la evaluación de la rueda i sólo ve hasta la rueda i
         const b = { t: B.t.slice(0, i+1), o: B.o.slice(0, i+1), h: B.h.slice(0, i+1),
                     l: B.l.slice(0, i+1), c: B.c.slice(0, i+1), v: B.v.slice(0, i+1), meta: B.meta };
-        let score, signals;
+        let signals;
         try{
-          // Se pasan las series enteras: el único consumidor que va más allá de
-          // `last` es la divergencia de RSI, y sólo lee posiciones de pivote que
-          // están por detrás de i, así que no se asoma a ruedas futuras.
           const I = Object.assign({}, A, { last: snapshotAt(B, A, i) });
           const S = computeStructure(b, I, 42, pre);
-          const r2 = buildSignals(b, I, S, { ccy: 'u$s' });
-          score = r2.score; signals = r2.signals;
+          signals = buildSignals(b, I, S, { ccy: 'u$s' }).signals;
         }catch(e){ continue; }
 
         const fwd = B.c[i] ? (B.c[i+H] / B.c[i] - 1) * 100 : null;
         if(!isNum(fwd)) continue;
 
-        const cat = veredicto(score).txt;
-        const esCompra = cat.startsWith('COMPRA'), esVenta = cat.startsWith('VENTA');
-        sumar(porCat[cat], fwd, esVenta ? fwd < 0 : fwd > 0);
-        sumar(base, fwd, fwd > 0);
-        signals.forEach(sg => {
-          if(!sg.state) return;
-          const k = porSenal[sg.label] = porSenal[sg.label] || { up: acum(), dn: acum() };
-          sumar(sg.state > 0 ? k.up : k.dn, fwd, sg.state > 0 ? fwd > 0 : fwd < 0);
-        });
+        const day = Math.floor(B.t[i] / 86400);   // día calendario del timestamp de Yahoo
+        if(day < diaMin) diaMin = day;
+        if(day > diaMax) diaMax = day;
+        eventos.push({ day, fwd, signals });
+        if(!fwdPorDia.has(day)) fwdPorDia.set(day, []);
+        fwdPorDia.get(day).push(fwd);
+
         evaluaciones++;
-        if(evaluaciones % 400 === 0){
-          pb.style.width = (35 + (si / series.length) * 65) + '%';
+        if(evaluaciones % 500 === 0){
+          pb.style.width = (30 + (si / series.length) * 40) + '%';
           $('#bt-pill').textContent = evaluaciones.toLocaleString('es-AR') + ' CASOS';
           await sleep(0);   // devuelve el control para que la página no se congele
         }
       }
     }
-    renderBacktest({ porCat, porSenal, base, evaluaciones, papeles, H, rango, CATS });
+
+    // Media del universo ESE día, cruda y SIN costo: es la referencia pasiva
+    // ("estar en cualquier papel del universo ese día"), no un trade que
+    // alguien ejecuta -- por eso no lleva el costo de ida y vuelta.
+    const mediaDia = new Map();
+    fwdPorDia.forEach((arr, day) => mediaDia.set(day, arr.reduce((a, b) => a + b, 0) / arr.length));
+
+    pb.style.width = '72%';
+    await sleep(0);
+
+    // Pase 2: exceso de cada evento = su retorno menos el del universo ESE
+    // mismo día (saca el "el mercado subió/bajó" de la ecuación), neto del
+    // costo de ida y vuelta (esto sí es un trade real). También se anota el
+    // score/categoría MANUAL (los pesos de siempre) y se arma la tabla
+    // diagnóstica "señal por señal" con TODOS los eventos, en muestra completa
+    // -- esa tabla es sólo descriptiva, no alimenta ningún peso calibrado.
+    const regsCatDiag = {}; CATS.forEach(c => regsCatDiag[c] = []);
+    const regsSenal = {};
+    eventos.forEach(ev => {
+      ev.exceso = (ev.fwd - mediaDia.get(ev.day)) - costoRT;
+      ev.scoreManual = scoreConPesos(ev.signals, null);
+      ev.catManual = veredicto(ev.scoreManual).txt;
+      regsCatDiag[ev.catManual].push({ day: ev.day, val: ev.exceso });
+      ev.signals.forEach(sg => {
+        if(!sg.state) return;
+        const k = regsSenal[sg.label] = regsSenal[sg.label] || { up: [], dn: [] };
+        (sg.state > 0 ? k.up : k.dn).push({ day: ev.day, val: ev.exceso });
+      });
+    });
+
+    pb.style.width = '85%';
+    await sleep(0);
+
+    let resultado = wf ? walkForward(eventos, CATS, diaMin, diaMax) : null;
+    const modo = resultado ? 'walkforward' : 'simple';
+    if(!resultado){
+      resultado = evaluarVentana(eventos, eventos, CATS);
+      resultado.porVentana = null;
+    }
+
+    renderBacktest({ modo, ...resultado, regsCatDiag, regsSenal, evaluaciones, papeles, H, rango, CATS,
+                     costoRT, diasTotales: fwdPorDia.size });
   }catch(e){
     $('#t-bt-cat tbody').innerHTML = '<tr><td colspan="7" class="empty">✕ ' + esc(e.message) + '</td></tr>';
   }finally{
@@ -4460,71 +4721,135 @@ async function runBacktest(){
   }
 }
 
+/**
+ * Panel manual-vs-calibrado + tabla de ventanas (varianza entre períodos).
+ * También persiste los pesos calibrados vigentes para que la pantalla de
+ * análisis de un papel individual pueda mostrar el score calibrado al lado
+ * del manual.
+ */
+function renderComparacion(R){
+  const card = $('#bt-comparacion');
+  card.style.display = 'block';
+  const comprasManual = (R.regsCatManual['COMPRA FUERTE']||[]).concat(R.regsCatManual['COMPRA']||[]);
+  const comprasCalib  = (R.regsCatCalibrado['COMPRA FUERTE']||[]).concat(R.regsCatCalibrado['COMPRA']||[]);
+  const stM = statDia(comprasManual, R.H), stC = statDia(comprasCalib, R.H);
+
+  $('#bt-comp-pill').textContent = R.modo === 'walkforward'
+    ? (R.porVentana.length + ' VENTANAS FUERA DE MUESTRA') : 'MISMA MUESTRA · SIN WALK-FORWARD';
+  $('#bt-comp-pill').className = 'pill ' + (R.modo === 'walkforward' ? 'live' : '');
+
+  const panel = (nombre, st, n) => {
+    const fuerte = isNum(st.t) && Math.abs(st.t) >= 2;
+    return '<div style="min-width:150px">' +
+      '<div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.06em">' + nombre + '</div>' +
+      '<div style="font-size:22px;font-weight:700" class="' + cls(st.media) + '">' + pf(st.media,2) + '</div>' +
+      '<div style="font-size:11px;color:var(--text3)">t = ' + (isNum(st.t)?nf(st.t,1):'—') +
+        (fuerte ? '' : ' · sin distinguirse del azar') +
+      '</div><div style="font-size:10px;color:var(--text4)">' + n.toLocaleString('es-AR') + ' casos</div></div>';
+  };
+  const dif = (isNum(stC.media) && isNum(stM.media)) ? stC.media - stM.media : null;
+  $('#bt-comp-resumen').innerHTML =
+    panel('Manual (pesos a mano)', stM, comprasManual.length) +
+    panel('Calibrado (evidencia)', stC, comprasCalib.length) +
+    '<div style="min-width:150px"><div style="font-size:10px;color:var(--text4);text-transform:uppercase;letter-spacing:.06em">Diferencia</div>' +
+    '<div style="font-size:22px;font-weight:700" class="' + cls(dif) + '">' + pf(dif,2) + '</div>' +
+    '<div style="font-size:11px;color:var(--text3)">cuánto pagaba (o ganaba) la intuición</div></div>';
+
+  const tb = $('#t-bt-ventanas tbody');
+  if(R.porVentana && R.porVentana.length){
+    tb.innerHTML = R.porVentana.map(v => {
+      const cM = (v.regsCatManual['COMPRA FUERTE']||[]).concat(v.regsCatManual['COMPRA']||[]);
+      const cC = (v.regsCatCalibrado['COMPRA FUERTE']||[]).concat(v.regsCatCalibrado['COMPRA']||[]);
+      const sM = statDia(cM, R.H), sC = statDia(cC, R.H);
+      const y0 = new Date(v.finCal*86400000).getUTCFullYear(), y1 = new Date(v.finEval*86400000).getUTCFullYear();
+      return '<tr><td class="m">' + y0 + ' → ' + y1 + '</td>' +
+        '<td class="r">' + v.nEval.toLocaleString('es-AR') + '</td>' +
+        '<td class="r ' + cls(sM.media) + '">' + pf(sM.media,2) + '</td>' +
+        '<td class="r ' + (isNum(sM.t)&&Math.abs(sM.t)>=2?'':'nu') + '">' + (isNum(sM.t)?nf(sM.t,1):'—') + '</td>' +
+        '<td class="r ' + cls(sC.media) + '">' + pf(sC.media,2) + '</td>' +
+        '<td class="r ' + (isNum(sC.t)&&Math.abs(sC.t)>=2?'':'nu') + '">' + (isNum(sC.t)?nf(sC.t,1):'—') + '</td></tr>';
+    }).join('');
+  } else {
+    tb.innerHTML = '<tr><td colspan="6" class="empty">Sin walk-forward: no hay ventanas separadas para medir la varianza entre períodos</td></tr>';
+  }
+
+  try{
+    const vigentes = R.pesosVigentes || R.pesos;
+    if(vigentes) localStorage.setItem('at-pesos-calibrados', JSON.stringify({
+      pesos: vigentes, fecha: new Date().toISOString(), modo: R.modo,
+      universo: $('#i-univ-b').value, H: R.H,
+      confiable: R.modo === 'walkforward'
+    }));
+  }catch(e){}
+}
+
 function renderBacktest(R){
-  const mBase = media(R.base);
   $('#bt-pill').textContent = R.evaluaciones.toLocaleString('es-AR') + ' CASOS · ' + R.papeles + ' PAPELES';
   $('#bt-pill').className = 'pill live';
-  $('#bt-base').textContent = 'BASE ' + pf(mBase, 2) + ' A ' + R.H + ' RUEDAS';
+  $('#bt-base').textContent = 'EXCESO SOBRE EL UNIVERSO, MISMO DÍA' +
+    (R.costoRT > 0 ? ' · NETO DE ' + Math.round(R.costoRT * 100) + ' PB' : ' · SIN COSTO') +
+    ' · ' + R.H + ' RUEDAS · ' + R.diasTotales.toLocaleString('es-AR') + ' DÍAS DE MERCADO' +
+    (R.modo === 'walkforward' ? ' · WALK-FORWARD' : ' · SIN WALK-FORWARD (cota optimista)');
 
   $('#t-bt-cat tbody').innerHTML = R.CATS.map(c => {
-    const a = R.porCat[c];
-    if(!a.n) return '<tr><td class="m">' + c + '</td><td colspan="6" class="empty" style="padding:7px 9px">sin casos</td></tr>';
-    const m = media(a), ventaja = m - mBase, t = tStat(a, R.base);
+    const regs = R.regsCatDiag[c];
+    if(!regs.length) return '<tr><td class="m">' + c + '</td><td colspan="6" class="empty" style="padding:7px 9px">sin casos</td></tr>';
+    const st = statDia(regs, R.H);
     const esCompra = c.startsWith('COMPRA'), esVenta = c.startsWith('VENTA');
-    // En las bajistas, "aportar" es quedar por DEBAJO de la base
-    const buena = esCompra ? ventaja > 0 : esVenta ? ventaja < 0 : null;
-    const fuerte = isNum(t) && Math.abs(t) >= 2;
+    const buena = esCompra ? st.media > 0 : esVenta ? st.media < 0 : null;
+    const fuerte = isNum(st.t) && Math.abs(st.t) >= 2;
     const lectura = buena === null ? '<span class="chip nu">referencia</span>'
       : !fuerte ? '<span class="chip nu">ruido</span>'
       : buena ? '<span class="chip up">aporta</span>' : '<span class="chip dn">al revés</span>';
+    const aciertos = regs.filter(r => esVenta ? r.val < 0 : r.val > 0).length / regs.length * 100;
     return '<tr>' +
       '<td class="m"><b>' + c + '</b></td>' +
-      '<td class="r">' + a.n.toLocaleString('es-AR') + '</td>' +
-      '<td class="r ' + cls(m) + '">' + pf(m,2) + '</td>' +
-      '<td class="r ' + (buena === null ? '' : buena ? 'up' : 'dn') + '"><b>' + pf(ventaja,2) + '</b></td>' +
-      '<td class="r">' + nf(a.aciertos / a.n * 100, 0) + '%</td>' +
-      '<td class="r ' + (fuerte ? '' : 'nu') + '">' + (isNum(t) ? nf(t,1) : '—') + '</td>' +
+      '<td class="r">' + regs.length.toLocaleString('es-AR') + ' <span style="color:var(--text4)">(' + st.dias + 'd)</span></td>' +
+      '<td class="r ' + cls(st.media) + '"><b>' + pf(st.media,2) + '</b></td>' +
+      '<td class="r ' + (buena === null ? '' : buena ? 'up' : 'dn') + '">' + (buena === null ? '—' : (buena ? 'aporta' : 'al revés')) + '</td>' +
+      '<td class="r">' + nf(aciertos, 0) + '%</td>' +
+      '<td class="r ' + (fuerte ? '' : 'nu') + '">' + (isNum(st.t) ? nf(st.t,1) : '—') + '</td>' +
       '<td>' + lectura + '</td></tr>';
   }).join('');
 
-  const filas = Object.keys(R.porSenal).map(k => {
-    const s = R.porSenal[k];
-    const mu = media(s.up), md = media(s.dn);
-    // Ventaja: cuánto mejor rinde el papel cuando la señal marca alcista que cuando marca bajista
-    const ventaja = (isNum(mu) && isNum(md)) ? mu - md : null;
-    return { k, up: s.up, dn: s.dn, mu, md, ventaja, t: tStat(s.up, s.dn) };
-  }).filter(f => f.up.n >= 30 && f.dn.n >= 30)
+  const filas = Object.keys(R.regsSenal).map(k => {
+    const s = R.regsSenal[k];
+    const stUp = statDia(s.up, R.H), stDn = statDia(s.dn, R.H);
+    const ventaja = (isNum(stUp.media) && isNum(stDn.media)) ? stUp.media - stDn.media : null;
+    return { k, up: s.up, dn: s.dn, mu: stUp.media, md: stDn.media, ventaja, t: stUp.t, tDn: stDn.t };
+  }).filter(f => f.up.length >= 30 && f.dn.length >= 30)
     .sort((a, b) => (b.ventaja ?? -99) - (a.ventaja ?? -99));
 
   $('#t-bt-sig tbody').innerHTML = filas.length ? filas.map(f => {
     const fuerte = isNum(f.t) && Math.abs(f.t) >= 2;
     return '<tr>' +
       '<td class="m">' + esc(f.k) + '</td>' +
-      '<td class="r">' + f.up.n.toLocaleString('es-AR') + '</td>' +
+      '<td class="r">' + f.up.length.toLocaleString('es-AR') + '</td>' +
       '<td class="r ' + cls(f.mu) + '">' + pf(f.mu,2) + '</td>' +
-      '<td class="r">' + f.dn.n.toLocaleString('es-AR') + '</td>' +
+      '<td class="r">' + f.dn.length.toLocaleString('es-AR') + '</td>' +
       '<td class="r ' + cls(f.md) + '">' + pf(f.md,2) + '</td>' +
       '<td class="r ' + (isNum(f.ventaja) ? (f.ventaja > 0 ? 'up' : 'dn') : '') + '"><b>' + pf(f.ventaja,2) + '</b></td>' +
-      '<td class="r ' + (fuerte ? '' : 'nu') + '">' + (isNum(f.t) ? nf(f.t,1) : '—') + '</td></tr>';
+      '<td class="r ' + (fuerte ? '' : 'nu') + '" title="t de la pata alcista contra 0 (Newey-West, agrupado por día)">' + (isNum(f.t) ? nf(f.t,1) : '—') + '</td></tr>';
   }).join('') : '<tr><td colspan="7" class="empty">Pocos casos por señal para concluir algo</td></tr>';
 
-  const compras = acum();
-  ['COMPRA FUERTE','COMPRA'].forEach(c => {
-    const a = R.porCat[c];
-    compras.n += a.n; compras.suma += a.suma; compras.sumaSq += a.sumaSq; compras.aciertos += a.aciertos;
-  });
-  const mC = media(compras), vent = isNum(mC) ? mC - mBase : null, t = tStat(compras, R.base);
+  const compras = (R.regsCatManual['COMPRA FUERTE'] || []).concat(R.regsCatManual['COMPRA'] || []);
+  const stC = statDia(compras, R.H);
   $('#bt-veredicto').style.display = 'block';
   let txt, k;
-  if(!isNum(t) || compras.n < 50){ txt = 'DATOS INSUFICIENTES'; k = 'n0'; }
-  else if(Math.abs(t) < 2){ txt = 'NO SE DISTINGUE DEL AZAR'; k = 'n0'; }
-  else if(vent > 0){ txt = 'TIENE FILO'; k = 'b1'; }
+  if(!isNum(stC.t) || compras.length < 50){ txt = 'DATOS INSUFICIENTES'; k = 'n0'; }
+  else if(Math.abs(stC.t) < 2){ txt = 'NO SE DISTINGUE DEL AZAR'; k = 'n0'; }
+  else if(stC.media > 0){ txt = 'TIENE FILO'; k = 'b1'; }
   else { txt = 'FUNCIONA AL REVÉS'; k = 's1'; }
   $('#bt-vbox').className = 'verdict ' + k;
   $('#bt-vtxt').textContent = txt;
-  $('#bt-vsub').innerHTML = 'Comprar con señal alcista rindió <b>' + pf(mC,2) + '</b> a ' + R.H +
-    ' ruedas, contra <b>' + pf(mBase,2) + '</b> de comprar cualquier día · ventaja <b>' + pf(vent,2) +
-    '</b> · t = ' + (isNum(t) ? nf(t,1) : '—') + ' sobre ' + compras.n.toLocaleString('es-AR') + ' casos';
+  $('#bt-vsub').innerHTML = 'Comprar con señal alcista (pesos manuales) rindió <b>' + pf(stC.media,2) +
+    '</b> de exceso sobre el universo el mismo día' +
+    (R.costoRT > 0 ? ', neto de ' + Math.round(R.costoRT*100) + ' pb de costo,' : ',') + ' a ' + R.H +
+    ' ruedas · t (Newey-West, agrupado por día) = ' + (isNum(stC.t) ? nf(stC.t,1) : '—') +
+    ' sobre ' + compras.length.toLocaleString('es-AR') + ' casos (' + stC.dias + ' días distintos)' +
+    (R.modo === 'walkforward' ? ' · fuera de muestra (walk-forward)' : ' · MISMA muestra usada para calibrar (sin walk-forward, cota optimista)');
+
+  renderComparacion(R);
 }
 
 const TEMA_KEY = 'at-tema';
