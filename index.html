@@ -988,7 +988,7 @@ tbody tr.clk{cursor:pointer}
  */
 // Versión visible arriba a la derecha. SUMAR 1 EN CADA CAMBIO PUBLICADO,
 // así se puede verificar de un vistazo que el sitio sirve la última build.
-const APP_VERSION = 15;
+const APP_VERSION = 16;
 
 const UNIVERSOS = {
   usd: {
@@ -1653,11 +1653,20 @@ function fetchConCorte(url, ms){
  * dos proxies públicos. Cada intento tiene su propio corte por tiempo, así una
  * conexión que no responde no deja la app esperando para siempre.
  */
+// Proxy propio en Cloudflare Workers (ver yahoo-proxy-worker.js en el repo).
+// Reemplaza a corsproxy.io, que dejo de aceptar URLs anonimas sin API key
+// (403 "keyless_legacy_url" -- no es temporal, es un cambio de negocio de
+// ellos), y complementa a allorigins.win, que empezo a no responder ni
+// pedidos triviales. Yahoo en si nunca fue el problema: con un User-Agent
+// de navegador normal responde 200 sin drama, que es justo lo que hace
+// este Worker antes de reenviar.
+const PROXY_PROPIO = 'https://gentle-wave-7e08.novoa-lautaro-2002.workers.dev/?url=';
+
 async function pfetch(url){
   const intentos = [
     { u: url, envuelto: false },
-    { u: 'https://api.allorigins.win/get?url=' + encodeURIComponent(url), envuelto: true },
-    { u: 'https://corsproxy.io/?' + encodeURIComponent(url), envuelto: false }
+    { u: PROXY_PROPIO + encodeURIComponent(url), envuelto: false },
+    { u: 'https://api.allorigins.win/get?url=' + encodeURIComponent(url), envuelto: true }
   ];
   for(const intento of intentos){
     try{
