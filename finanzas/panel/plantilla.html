@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finanzas</title>
+<style>
+:root{
+  --paper:#F2F6F5; --surface:#fff; --surface-2:#E8EFED;
+  --ink:#0F1A1B; --muted:#586B69; --line:#D2DEDC;
+  --accent:#0A6A61; --ok:#2C6E4B; --ok-soft:#DCEDE2;
+  --warn:#8A5D00; --warn-soft:#F3E9D2; --stop:#9E3728; --stop-soft:#F4E0DC;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme=light]){
+  --paper:#0C1314; --surface:#141E1F; --surface-2:#1B2829;
+  --ink:#E1EBE9; --muted:#93A7A4; --line:#263536;
+  --accent:#4FC9B5; --ok:#63BA86; --ok-soft:#132A1F;
+  --warn:#D3A44B; --warn-soft:#2C2415; --stop:#E17C6A; --stop-soft:#2E1A17;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.doc{max-width:64rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+h1{font-size:1.6rem;margin:0 0 .2rem;letter-spacing:-.01em}
+.sub{color:var(--muted);margin:0 0 2rem;font-size:.92rem}
+h2{font-size:1.05rem;margin:2.5rem 0 .75rem;padding-top:.9rem;
+  border-top:2px solid var(--ink);letter-spacing:-.005em}
+.vacio{color:var(--muted);font-size:.92rem;padding:1rem 0}
+
+.tiras{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));
+  border:1px solid var(--line);background:var(--surface);margin-bottom:1rem}
+.tiras div{padding:.9rem 1rem;border-right:1px solid var(--line)}
+.tiras div:last-child{border-right:0}
+.tiras dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:.25rem}
+.tiras dd{margin:0;font-size:1.25rem;font-weight:600;font-variant-numeric:tabular-nums}
+
+.scroll{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:34rem;font-size:.88rem}
+th,td{text-align:left;padding:.55rem .75rem;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:500;
+  background:var(--surface-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;font-family:var(--mono)}
+.neg{color:var(--stop)} .pos{color:var(--ok)}
+.pill{display:inline-block;font-family:var(--mono);font-size:.66rem;
+  padding:.15em .5em;border-radius:2px;white-space:nowrap}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
+.p-warn{background:var(--warn-soft);color:var(--warn)}
+.p-stop{background:var(--stop-soft);color:var(--stop)}
+.aviso{border-left:3px solid var(--stop);background:var(--surface);
+  padding:.9rem 1.1rem;margin:1rem 0;font-size:.92rem}
+</style>
+</head>
+<body>
+<div class="doc">
+  <h1>Finanzas</h1>
+  <p class="sub" id="sub">Cargando…</p>
+  <div id="app"></div>
+</div>
+
+<script>
+const fmt = (v, m) => {
+  const s = new Intl.NumberFormat('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2})
+    .format(Math.abs(v));
+  return (v < 0 ? '-' : '') + (m === 'USD' ? 'US$ ' : '$ ') + s;
+};
+const cls = v => v < 0 ? 'neg' : 'pos';
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function tabla(cols, filas) {
+  if (!filas.length) return '<p class="vacio">Sin datos todavía.</p>';
+  return `<div class="scroll"><table><thead><tr>${
+    cols.map(c => `<th${c.n ? ' class="n"' : ''}>${c.t}</th>`).join('')
+  }</tr></thead><tbody>${
+    filas.map(f => `<tr>${f.map((v,i) =>
+      `<td${cols[i].n ? ' class="n"' : ''}>${v}</td>`).join('')}</tr>`).join('')
+  }</tbody></table></div>`;
+}
+
+fetch('datos.json').then(r => r.json()).then(d => {
+  document.getElementById('sub').textContent =
+    `Generado el ${d.generado} · ${d.movimientos.length} movimientos recientes`;
+
+  const partes = [];
+  const s = d.salud;
+
+  // La salud de la ingesta va primero: el silencio es el modo de falla que
+  // no se ve, y en un panel de finanzas se confunde con un mes sin gastos.
+  if (s.ingesta_sospechosa) {
+    partes.push(`<div class="aviso"><strong>Hace ${s.dias_sin_movimientos} días
+      que no entra un movimiento.</strong> Si eso no es normal, la ingesta está rota:
+      subí los resúmenes nuevos o revisá la conexión con Mercado Pago.</div>`);
+  }
+
+  partes.push(`<dl class="tiras">
+    <div><dt>Cuentas</dt><dd>${d.cuentas.length}</dd></div>
+    <div><dt>Último movimiento</dt><dd style="font-size:1rem">${
+      s.dias_sin_movimientos === null ? '—' : `hace ${s.dias_sin_movimientos} d`}</dd></div>
+    <div><dt>Conciliación</dt><dd style="font-size:1rem">${
+      s.conciliaciones_totales
+        ? `${s.conciliaciones_que_cierran}/${s.conciliaciones_totales} cierran`
+        : 'sin anclas'}</dd></div>
+    <div><dt>Cuotas por pagar</dt><dd>${d.cuotas.length}</dd></div>
+  </dl>`);
+
+  partes.push('<h2>Cuentas</h2>' + tabla(
+    [{t:'Cuenta'},{t:'Moneda'},{t:'Mov',n:1},{t:'Desde'},{t:'Hasta'},{t:'Neto',n:1}],
+    d.cuentas.map(c => [esc(c.cuenta), c.moneda, c.movimientos, c.desde, c.hasta,
+      `<span class="${cls(c.neto)}">${fmt(c.neto, c.moneda)}</span>`])));
+
+  partes.push('<h2>Conciliación</h2>' + (d.conciliacion.length
+    ? tabla([{t:'Cuenta'},{t:'Fecha'},{t:'Saldo real',n:1},{t:'Derivado',n:1},
+             {t:'Diferencia',n:1},{t:'Estado'}],
+        d.conciliacion.map(c => [esc(c.cuenta), c.fecha,
+          fmt(c.saldo_real, c.moneda), fmt(c.saldo_derivado, c.moneda),
+          `<span class="${cls(c.diferencia)}">${fmt(c.diferencia, c.moneda)}</span>`,
+          c.cuadra ? '<span class="pill p-ok">cierra</span>'
+                   : '<span class="pill p-warn">falta capturar</span>']))
+    : `<p class="vacio">Sin saldos cargados. Cargá uno con
+       <code>finanzas saldo &lt;cuenta&gt; &lt;monto&gt;</code> para que la
+       conciliación empiece a validar la ingesta.</p>`));
+
+  partes.push('<h2>Cuotas comprometidas</h2>' + tabla(
+    [{t:'Descripción'},{t:'Cuenta'},{t:'Cuota'},{t:'Por cuota',n:1},{t:'Pendiente',n:1}],
+    d.cuotas.map(c => [esc(c.descripcion), esc(c.cuenta),
+      `${c.cuota_actual}/${c.cuota_total}`,
+      fmt(c.monto_cuota, c.moneda), fmt(c.pendiente, c.moneda)])));
+
+  partes.push('<h2>Por categoría</h2>' + tabla(
+    [{t:'Categoría'},{t:'Moneda'},{t:'Mov',n:1},{t:'Total',n:1}],
+    d.por_categoria.map(c => [esc(c.categoria), c.moneda, c.n,
+      `<span class="${cls(c.total)}">${fmt(c.total, c.moneda)}</span>`])));
+
+  partes.push('<h2>Movimientos recientes</h2>' + tabla(
+    [{t:'Fecha'},{t:'Cuenta'},{t:'Descripción'},{t:'Categoría'},{t:'Monto',n:1}],
+    d.movimientos.map(m => [m.fecha, esc(m.cuenta),
+      esc(m.descripcion) + (m.cuota ? ` <span class="pill p-warn">${m.cuota}</span>` : ''),
+      m.categoria ? esc(m.categoria) : '<span class="pill p-stop">sin categoría</span>',
+      `<span class="${cls(m.monto)}">${fmt(m.monto, m.moneda)}</span>`])));
+
+  document.getElementById('app').innerHTML = partes.join('');
+}).catch(e => {
+  document.getElementById('sub').textContent = 'No se pudo leer datos.json';
+  document.getElementById('app').innerHTML =
+    `<div class="aviso">Generá los datos con <code>finanzas panel</code> y servilo
+     con <code>python3 -m http.server -d panel</code>. Abrir el archivo directo
+     con file:// no funciona: el navegador bloquea el fetch.</div>`;
+});
+</script>
+</body>
+</html>

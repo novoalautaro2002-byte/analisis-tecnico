@@ -1,0 +1,18 @@
+# Nada de datos financieros en el repo. Este repo es publico.
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+entrada/
+procesados/
+datos.json
+.env
+credenciales.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+panel/index.html
