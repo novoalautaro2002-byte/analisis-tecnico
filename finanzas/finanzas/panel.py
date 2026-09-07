@@ -15,6 +15,13 @@ from decimal import Decimal
 from pathlib import Path
 
 from . import normalizar
+from .modelo import TIPOS_NO_COMPUTABLES
+
+# Se excluyen de todo total de gastos, pero siguen en la base: el total
+# impreso del resumen los incluye y sin ellos la verificacion no cierra.
+_FILTRO_COMPUTABLE = "tipo NOT IN ({})".format(
+    ",".join(f"'{t}'" for t in sorted(TIPOS_NO_COMPUTABLES))
+)
 
 
 def _d(valor: Decimal) -> float:
@@ -32,19 +39,21 @@ def construir_datos(con: sqlite3.Connection) -> dict:
     ).fetchall()
 
     por_mes = con.execute(
-        """
+        f"""
         SELECT substr(fecha, 1, 7) AS mes, moneda,
                SUM(CASE WHEN centavos < 0 THEN -centavos ELSE 0 END) AS egresos,
                SUM(CASE WHEN centavos > 0 THEN  centavos ELSE 0 END) AS ingresos
-        FROM movimientos GROUP BY mes, moneda ORDER BY mes
+        FROM movimientos WHERE {_FILTRO_COMPUTABLE}
+        GROUP BY mes, moneda ORDER BY mes
         """
     ).fetchall()
 
     por_categoria = con.execute(
-        """
+        f"""
         SELECT COALESCE(categoria, 'sin categoria') AS categoria, moneda,
                COUNT(*) AS n, SUM(centavos) AS total
-        FROM movimientos GROUP BY categoria, moneda
+        FROM movimientos WHERE {_FILTRO_COMPUTABLE}
+        GROUP BY categoria, moneda
         ORDER BY ABS(SUM(centavos)) DESC
         """
     ).fetchall()
@@ -54,6 +63,14 @@ def construir_datos(con: sqlite3.Connection) -> dict:
         SELECT fecha, cuenta, descripcion, centavos, moneda, categoria,
                cuota_actual, cuota_total
         FROM movimientos ORDER BY fecha DESC, id LIMIT 100
+        """
+    ).fetchall()
+
+    excluido = con.execute(
+        f"""
+        SELECT tipo, moneda, COUNT(*) AS n, SUM(centavos) AS total
+        FROM movimientos WHERE NOT ({_FILTRO_COMPUTABLE})
+        GROUP BY tipo, moneda ORDER BY tipo
         """
     ).fetchall()
 
@@ -70,6 +87,14 @@ def construir_datos(con: sqlite3.Connection) -> dict:
             "conciliaciones_que_cierran": sum(1 for c in conciliaciones if c.cuadra),
             "conciliaciones_totales": len(conciliaciones),
         },
+        # Impuestos y pagos de tarjeta: se muestran aparte, nunca en gastos.
+        "excluido": [
+            {
+                "tipo": f["tipo"], "moneda": f["moneda"], "n": f["n"],
+                "total": _d(Decimal(f["total"]) / 100),
+            }
+            for f in excluido
+        ],
         "cuentas": [
             {
                 "cuenta": f["cuenta"], "moneda": f["moneda"],

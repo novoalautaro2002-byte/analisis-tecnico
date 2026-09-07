@@ -30,6 +30,7 @@ class Tipo(str, Enum):
     IMPUESTO = "impuesto"
     INTERES = "interes"
     COMISION = "comision"
+    PAGO_TARJETA = "pago_tarjeta"
     AJUSTE = "ajuste"
     DESCONOCIDO = "desconocido"
 
@@ -37,6 +38,24 @@ class Tipo(str, Enum):
 class Moneda(str, Enum):
     ARS = "ARS"
     USD = "USD"
+
+
+# Tipos que NO son gasto propio y quedan fuera de todo total de gastos.
+#
+# IMPUESTO: las percepciones sobre consumos en dolares se devuelven al pagar
+#   en dolares (la linea DEV.IMP. del resumen). Contarlas seria inflar el
+#   gasto con plata que vuelve.
+# PAGO_TARJETA: el pago del resumen no es un ingreso, es la liquidacion de
+#   consumos que ya se contaron uno por uno. Sumarlo los contaria dos veces.
+#
+# Se siguen guardando: el total impreso del resumen los incluye, y sin ellos
+# la verificacion contra ese total no cierra.
+TIPOS_NO_COMPUTABLES = frozenset({"impuesto", "pago_tarjeta"})
+
+
+def es_gasto_computable(tipo: "Tipo | str") -> bool:
+    valor = tipo.value if isinstance(tipo, Tipo) else str(tipo)
+    return valor not in TIPOS_NO_COMPUTABLES
 
 
 # --------------------------------------------------------------------------

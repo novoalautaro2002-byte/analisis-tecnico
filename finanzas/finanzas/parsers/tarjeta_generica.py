@@ -215,7 +215,10 @@ def _nombre_de_cuenta(doc) -> str:
 
 
 def _inferir_tipo(desc_norm: str, es_tarjeta: bool) -> Tipo:
-    if any(p in desc_norm for p in ("IVA", "PERCEPCION", "IMPUESTO", "LEY 25413", "SELLOS")):
+    if any(p in desc_norm for p in (
+        "IVA", "PERCEPCION", "PERCEP", "IMPUESTO", "LEY 25413", "SELLOS",
+        "RG 5617", "RG 4815", "RG 4240", "IIBB", "DEV IMP", "DEV PER",
+    )):
         return Tipo.IMPUESTO
     if any(p in desc_norm for p in ("INTERES", "PUNITORIO", "FINANCIACION")):
         return Tipo.INTERES
@@ -223,6 +226,8 @@ def _inferir_tipo(desc_norm: str, es_tarjeta: bool) -> Tipo:
         return Tipo.COMISION
     if any(p in desc_norm for p in ("TRANSFERENCIA", "TRANSF", "DEBIN", "CVU", "CBU")):
         return Tipo.TRANSFERENCIA
+    if any(p in desc_norm for p in ("SU PAGO", "PAGO RECIBIDO", "PAGO EN PESOS")):
+        return Tipo.PAGO_TARJETA
     if any(p in desc_norm for p in _ES_CREDITO):
         return Tipo.CREDITO
     return Tipo.COMPRA if es_tarjeta else Tipo.DESCONOCIDO

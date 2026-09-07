@@ -116,3 +116,64 @@ class TestCategorias:
         db.guardar_movimientos(con, [mov("2025-03-05", "-100", "SUPERMERCADO COTO SA")])
         normalizar.categorizar(con)
         assert db.leer_movimientos(con)[0].categoria == "mi categoria"
+
+
+class TestNoComputables:
+    """Impuestos y pago de tarjeta quedan fuera de todo total de gastos.
+
+    El usuario paga los consumos en dolares con dolares, y el banco le
+    devuelve la percepcion del 30%: contarla seria inflar el gasto con plata
+    que vuelve. El pago del resumen tampoco es un ingreso, es la liquidacion
+    de consumos ya contados uno por uno.
+    """
+
+    def test_se_guardan_igual(self, con):
+        # Siguen en la base: el total impreso del resumen los incluye y sin
+        # ellos la verificacion contra ese total no cerraria.
+        from finanzas.modelo import Tipo
+        m = mov("2025-03-25", "-1234", "IVA RG 4240")
+        m.tipo = Tipo.IMPUESTO
+        db.guardar_movimientos(con, [m])
+        assert len(db.leer_movimientos(con)) == 1
+
+    def test_no_suman_en_gastos_ni_ingresos(self, con):
+        from finanzas import panel
+        from finanzas.modelo import Tipo
+
+        compra = mov("2025-03-05", "-1000", "SUPERMERCADO")
+        impuesto = mov("2025-03-25", "-199075.86", "DB.RG 5617 30%")
+        impuesto.tipo = Tipo.IMPUESTO
+        pago = mov("2025-03-22", "115849.76", "SU PAGO EN PESOS")
+        pago.tipo = Tipo.PAGO_TARJETA
+        db.guardar_movimientos(con, [compra, impuesto, pago])
+
+        d = panel.construir_datos(con)
+        mes = [m for m in d["por_mes"] if m["mes"] == "2025-03"][0]
+        assert mes["egresos"] == 1000.0    # sin el impuesto
+        assert mes["ingresos"] == 0.0      # el pago no es ingreso
+
+    def test_quedan_visibles_aparte(self, con):
+        from finanzas import panel
+        from finanzas.modelo import Tipo
+
+        impuesto = mov("2025-03-25", "-1234", "IVA RG 4240")
+        impuesto.tipo = Tipo.IMPUESTO
+        db.guardar_movimientos(con, [impuesto])
+
+        d = panel.construir_datos(con)
+        assert [e["tipo"] for e in d["excluido"]] == ["impuesto"]
+        assert d["excluido"][0]["total"] == -1234.0
+
+
+class TestClasificacion:
+    def test_el_pago_del_resumen_no_es_credito(self, con):
+        from finanzas.parsers.tarjeta_generica import _inferir_tipo
+        from finanzas.modelo import Tipo, normalizar_texto
+        assert _inferir_tipo(normalizar_texto("SU PAGO EN PESOS"), True) == Tipo.PAGO_TARJETA
+
+    def test_percepciones_de_galicia_son_impuesto(self, con):
+        from finanzas.parsers.tarjeta_generica import _inferir_tipo
+        from finanzas.modelo import Tipo, normalizar_texto
+        for desc in ("DB.RG 5617 30%", "PERCEP.AFIP RG 4815 30%", "IIBB PERCEP-CABA",
+                     "IVA RG 4240 21%", "DEV.IMP. RG 5617 30%", "DEV PER RG 4815 30%"):
+            assert _inferir_tipo(normalizar_texto(desc), True) == Tipo.IMPUESTO, desc
