@@ -42,9 +42,19 @@ python -m finanzas saldo galicia_visa_4821 --monto=-34.070,62
 # 3. Estado general: cuentas, conciliación, cuotas comprometidas.
 python -m finanzas estado
 
-# 4. Panel HTML.
-python -m finanzas panel
-python3 -m http.server -d panel
+# 4. Panel HTML: lo genera, lo sirve y lo abre en el navegador.
+python -m finanzas servir
+```
+
+El panel lee `datos.json` por fetch, y el navegador bloquea esa lectura cuando
+la página se abre con `file://`. Por eso `servir` levanta un servidor local.
+Solo escucha en tu máquina; `--host 0.0.0.0` lo expone a la red local.
+
+Si preferís un archivo suelto que se abra sin servidor —para archivarlo, o
+mandártelo a otro lado— hay un modo que embebe los datos en el HTML:
+
+```bash
+python -m finanzas panel --unico     # panel/finanzas.html, un solo archivo
 ```
 
 ### Mercado Pago

@@ -2,7 +2,10 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Finanzas">
 <title>Finanzas</title>
 <style>
 :root{
@@ -20,21 +23,26 @@
 }}
 *{box-sizing:border-box}
 body{margin:0;background:var(--paper);color:var(--ink);
-  font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
-.doc{max-width:64rem;margin:0 auto;padding:2.5rem 1.25rem 5rem}
+  font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-text-size-adjust:100%}
+.doc{max-width:64rem;margin:0 auto;
+  padding:2.5rem max(1.25rem,env(safe-area-inset-left)) 5rem}
 h1{font-size:1.6rem;margin:0 0 .2rem;letter-spacing:-.01em}
 .sub{color:var(--muted);margin:0 0 2rem;font-size:.92rem}
 h2{font-size:1.05rem;margin:2.5rem 0 .75rem;padding-top:.9rem;
   border-top:2px solid var(--ink);letter-spacing:-.005em}
 .vacio{color:var(--muted);font-size:.92rem;padding:1rem 0}
+code{font-family:var(--mono);font-size:.85em;background:var(--surface-2);
+  padding:.1em .35em;border-radius:3px}
 
-.tiras{display:grid;grid-template-columns:repeat(auto-fit,minmax(11rem,1fr));
+.tiras{display:grid;grid-template-columns:repeat(auto-fit,minmax(10rem,1fr));
   border:1px solid var(--line);background:var(--surface);margin-bottom:1rem}
-.tiras div{padding:.9rem 1rem;border-right:1px solid var(--line)}
-.tiras div:last-child{border-right:0}
+.tiras div{padding:.9rem 1rem;border-right:1px solid var(--line);
+  border-bottom:1px solid var(--line)}
 .tiras dt{font-family:var(--mono);font-size:.64rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--muted);margin-bottom:.25rem}
 .tiras dd{margin:0;font-size:1.25rem;font-weight:600;font-variant-numeric:tabular-nums}
+.tiras dd.chico{font-size:1rem}
 
 .scroll{overflow-x:auto;border:1px solid var(--line);background:var(--surface)}
 table{border-collapse:collapse;width:100%;min-width:34rem;font-size:.88rem}
@@ -52,6 +60,25 @@ tbody tr:last-child td{border-bottom:0}
 .p-stop{background:var(--stop-soft);color:var(--stop)}
 .aviso{border-left:3px solid var(--stop);background:var(--surface);
   padding:.9rem 1.1rem;margin:1rem 0;font-size:.92rem}
+
+/* En un telefono una tabla de seis columnas obliga a scrollear al costado
+   para leer cada fila. Cada fila pasa a ser una ficha con sus etiquetas. */
+@media (max-width:640px){
+  body{font-size:16px}
+  .doc{padding:1.75rem 1rem 4rem}
+  h1{font-size:1.35rem}
+  .scroll{overflow-x:visible}
+  table{min-width:0}
+  thead{display:none}
+  tbody tr{display:block;padding:.7rem .85rem;border-bottom:1px solid var(--line)}
+  tbody tr:last-child{border-bottom:0}
+  tbody td{display:flex;justify-content:space-between;align-items:baseline;
+    gap:1rem;border:0;padding:.12rem 0;text-align:right}
+  tbody td::before{content:attr(data-l);font-family:var(--mono);font-size:.6rem;
+    letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+    text-align:left;flex:0 0 auto}
+  tbody td:empty{display:none}
+}
 </style>
 </head>
 <body>
@@ -60,6 +87,8 @@ tbody tr:last-child td{border-bottom:0}
   <p class="sub" id="sub">Cargando…</p>
   <div id="app"></div>
 </div>
+
+<!--DATOS-->
 
 <script>
 const fmt = (v, m) => {
@@ -76,20 +105,22 @@ function tabla(cols, filas) {
   return `<div class="scroll"><table><thead><tr>${
     cols.map(c => `<th${c.n ? ' class="n"' : ''}>${c.t}</th>`).join('')
   }</tr></thead><tbody>${
-    filas.map(f => `<tr>${f.map((v,i) =>
-      `<td${cols[i].n ? ' class="n"' : ''}>${v}</td>`).join('')}</tr>`).join('')
+    filas.map(f => `<tr>${f.map((v, i) =>
+      // data-l alimenta la etiqueta que aparece al lado del valor en telefono.
+      `<td data-l="${esc(cols[i].t)}"${cols[i].n ? ' class="n"' : ''}>${v}</td>`
+    ).join('')}</tr>`).join('')
   }</tbody></table></div>`;
 }
 
-fetch('datos.json').then(r => r.json()).then(d => {
+function pintar(d) {
   document.getElementById('sub').textContent =
     `Generado el ${d.generado} · ${d.movimientos.length} movimientos recientes`;
 
   const partes = [];
   const s = d.salud;
 
-  // La salud de la ingesta va primero: el silencio es el modo de falla que
-  // no se ve, y en un panel de finanzas se confunde con un mes sin gastos.
+  // La salud de la ingesta va primero: el silencio es el modo de falla que no
+  // se ve, y en un panel de finanzas se confunde con un mes sin gastos.
   if (s.ingesta_sospechosa) {
     partes.push(`<div class="aviso"><strong>Hace ${s.dias_sin_movimientos} días
       que no entra un movimiento.</strong> Si eso no es normal, la ingesta está rota:
@@ -98,9 +129,9 @@ fetch('datos.json').then(r => r.json()).then(d => {
 
   partes.push(`<dl class="tiras">
     <div><dt>Cuentas</dt><dd>${d.cuentas.length}</dd></div>
-    <div><dt>Último movimiento</dt><dd style="font-size:1rem">${
+    <div><dt>Último movimiento</dt><dd class="chico">${
       s.dias_sin_movimientos === null ? '—' : `hace ${s.dias_sin_movimientos} d`}</dd></div>
-    <div><dt>Conciliación</dt><dd style="font-size:1rem">${
+    <div><dt>Conciliación</dt><dd class="chico">${
       s.conciliaciones_totales
         ? `${s.conciliaciones_que_cierran}/${s.conciliaciones_totales} cierran`
         : 'sin anclas'}</dd></div>
@@ -143,12 +174,20 @@ fetch('datos.json').then(r => r.json()).then(d => {
       `<span class="${cls(m.monto)}">${fmt(m.monto, m.moneda)}</span>`])));
 
   document.getElementById('app').innerHTML = partes.join('');
-}).catch(e => {
+}
+
+// Con --unico los datos vienen embebidos en el archivo y no hace falta
+// servidor: el HTML se abre desde el telefono tal cual, incluso sin conexion.
+(window.__DATOS__
+  ? Promise.resolve(window.__DATOS__)
+  : fetch('datos.json').then(r => r.json())
+).then(pintar).catch(() => {
   document.getElementById('sub').textContent = 'No se pudo leer datos.json';
   document.getElementById('app').innerHTML =
     `<div class="aviso">Generá los datos con <code>finanzas panel</code> y servilo
-     con <code>python3 -m http.server -d panel</code>. Abrir el archivo directo
-     con file:// no funciona: el navegador bloquea el fetch.</div>`;
+     con <code>finanzas servir</code>. Abrir el archivo directo con file:// no
+     funciona porque el navegador bloquea el fetch; para eso está
+     <code>finanzas panel --unico</code>, que embebe los datos en el HTML.</div>`;
 });
 </script>
 </body>

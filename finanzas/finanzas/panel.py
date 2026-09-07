@@ -122,16 +122,43 @@ def construir_datos(con: sqlite3.Connection) -> dict:
     }
 
 
-def generar(con: sqlite3.Connection, salida: Path) -> Path:
+PLANTILLA = Path(__file__).parent.parent / "panel" / "plantilla.html"
+_MARCA_DATOS = "<!--DATOS-->"
+
+
+def generar(con: sqlite3.Connection, salida: Path, unico: bool = False) -> Path:
+    """Escribe el panel. Con unico=True los datos van embebidos en el HTML.
+
+    El modo unico existe por el telefono: un HTML que hace fetch de datos.json
+    no funciona abierto con file://, porque el navegador bloquea la lectura.
+    Con los datos adentro es un solo archivo que se manda por donde sea y se
+    abre sin servidor ni conexion.
+    """
     salida = Path(salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
 
     datos = construir_datos(con)
-    (salida.parent / "datos.json").write_text(
-        json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    html = PLANTILLA.read_text(encoding="utf-8")
 
-    plantilla = Path(__file__).parent.parent / "panel" / "plantilla.html"
-    if plantilla.exists() and plantilla.resolve() != salida.resolve():
-        salida.write_text(plantilla.read_text(encoding="utf-8"), encoding="utf-8")
+    if unico:
+        html = html.replace(_MARCA_DATOS, _bloque_datos(datos), 1)
+    else:
+        (salida.parent / "datos.json").write_text(
+            json.dumps(datos, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    if PLANTILLA.resolve() != salida.resolve():
+        salida.write_text(html, encoding="utf-8")
     return salida
+
+
+def _bloque_datos(datos: dict) -> str:
+    """Serializa los datos para embeberlos en el HTML.
+
+    '</script>' dentro del JSON cerraria la etiqueta antes de tiempo y rompe
+    la pagina, asi que se escapa. Los datos vienen de descripciones de
+    resumenes bancarios, que son texto arbitrario.
+    """
+    crudo = json.dumps(datos, ensure_ascii=False, separators=(",", ":"))
+    seguro = crudo.replace("</", "<\\/")
+    return f"<script>window.__DATOS__ = {seguro};</script>"

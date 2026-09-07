@@ -346,9 +346,54 @@ def cmd_sin_categoria(args) -> int:
 
 def cmd_panel(args) -> int:
     con = db.conectar(args.base)
-    salida = panel.generar(con, Path(args.salida))
+    salida = Path(args.salida)
+    if args.unico and salida.name == "index.html":
+        salida = salida.parent / "finanzas.html"
+
+    salida = panel.generar(con, salida, unico=args.unico)
     print(f"Panel generado en {salida}")
-    print(f"Abrilo con: python3 -m http.server -d {salida.parent}")
+    if args.unico:
+        print("Archivo unico con los datos adentro: se abre directo, sin servidor.")
+    else:
+        print(f"Abrilo con: finanzas servir --salida {salida.parent}")
+    return 0
+
+
+def cmd_servir(args) -> int:
+    """Sirve el panel por HTTP y lo abre en el navegador.
+
+    Hace falta un servidor porque el panel lee datos.json por fetch, y el
+    navegador bloquea esa lectura cuando la pagina se abre con file://.
+    """
+    import http.server
+    import socketserver
+    import threading
+    import webbrowser
+
+    raiz = Path(args.salida)
+    if not (raiz / "index.html").exists():
+        con = db.conectar(args.base)
+        panel.generar(con, raiz / "index.html")
+        print(f"Panel generado en {raiz / 'index.html'}")
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(raiz), **kw)
+
+        def log_message(self, *a):  # sin ruido de peticiones en la terminal
+            pass
+
+    # Por defecto solo escucha en la maquina: son tus finanzas, no tienen por
+    # que quedar expuestas al resto de la red sin que lo pidas.
+    with socketserver.TCPServer((args.host, args.puerto), Handler) as srv:
+        url = f"http://{'localhost' if args.host == '127.0.0.1' else args.host}:{args.puerto}/"
+        print(f"Panel en {url}   (Ctrl-C para cortar)")
+        if not args.sin_abrir:
+            threading.Timer(0.5, lambda: webbrowser.open(url)).start()
+        try:
+            srv.serve_forever()
+        except KeyboardInterrupt:
+            print("\nListo.")
     return 0
 
 
@@ -415,7 +460,17 @@ def construir_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("panel", help="genera el panel HTML")
     s.add_argument("--salida", default="panel/index.html")
+    s.add_argument("--unico", action="store_true",
+                   help="un solo archivo con los datos adentro, se abre sin servidor")
     s.set_defaults(func=cmd_panel)
+
+    s = sub.add_parser("servir", help="genera el panel, lo sirve y lo abre en el navegador")
+    s.add_argument("--salida", default="panel")
+    s.add_argument("--puerto", type=int, default=8420)
+    s.add_argument("--host", default="127.0.0.1",
+                   help="0.0.0.0 lo expone a toda la red local (default: solo esta maquina)")
+    s.add_argument("--sin-abrir", action="store_true")
+    s.set_defaults(func=cmd_servir)
 
     return p
 
