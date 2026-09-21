@@ -1,11 +1,34 @@
-# Bot de ejecución MAV
+# Bot de cotización MAV
 
-Automatización de cotización en subastas de cheques (CPD / echeq) en la
-Plataforma Trading MAV.
+Defiende tu tasa en subastas de cheques (CPD / echeq) de la Plataforma Trading
+MAV: vigila el libro y recotiza cuando alguien te supera, hasta tu piso.
 
-**Estado: relevamiento.** Todavía no hay bot. Lo único que hay acá son las
-herramientas para capturar las pantallas de la plataforma, que es el insumo
-para escribir el parser y la máquina de estados.
+    python ui.py
+
+Solo biblioteca estándar. Abre una pantalla local en 127.0.0.1 donde se ingresa
+(con el 2FA de siempre), se suman subastas y se las mira avanzar.
+
+## Cómo está armado
+
+| Módulo | Qué hace |
+|---|---|
+| `motor/sesion.py` | Habla con la plataforma: ingreso, lecturas y el POST. |
+| `motor/libro.py` | Lee el libro de una subasta desde el array `myData`. |
+| `motor/decision.py` | Decide, sin efectos: qué tasa poner y cuándo no mover. |
+| `motor/riesgo.py` | El gate: piso, monotonía, topes, banda de tasas, kill switch. |
+| `motor/formulario.py` | Arma el POST **copiando** los campos del servidor. |
+| `motor/vigilante.py` | Una subasta, como máquina de estados que no bloquea. |
+| `motor/mesa.py` | Varias subastas a la vez sobre una sola sesión. |
+| `ui.py` + `ui/` | La pantalla. |
+
+Dos reglas sostienen todo lo demás:
+
+- **El bot copia, no escribe.** De los ~70 campos del POST decide dos: la tasa y
+  la acción. Comitente y CUIT se relayan tal cual los mandó el servidor, y si
+  alguno quedara distinto, no sale la orden.
+- **Nada bloquea.** `tick()` vuelve enseguida y las esperas se agendan. Por eso
+  puede haber N subastas, el botón de parar responde al toque, y los tiempos
+  configurados son los que se cumplen.
 
 ## Reglas que no se negocian
 

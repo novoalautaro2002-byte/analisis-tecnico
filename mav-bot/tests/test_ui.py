@@ -1,122 +1,151 @@
-"""Tests del trabajador de la interfaz.
+"""Tests de la interfaz.
 
-La interfaz es la superficie desde la que se lanzan ordenes reales, asi que lo
-que importa es que una config invalida no arranque nada y que parar realmente
-pare.
+Es la superficie desde la que se lanzan órdenes reales, así que lo que importa
+es que sin sesión no arranque nada, que la contraseña no se filtre al estado, y
+que se puedan vigilar varias subastas a la vez.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import ui  # noqa: E402
-from motor.libro import parsear_libro  # noqa: E402
-from tests.test_libro import armar_html  # noqa: E402
+from motor.config import ConfigInvalida  # noqa: E402
+from motor.libro import LibroIlegible  # noqa: E402
+from motor.sesion import ErrorDePlataforma  # noqa: E402
+from tests.test_vigilante import SesionFalsa  # noqa: E402
 
 BUENA = {
     "ident": 1556714, "piso": "25,00",
     "decremento_min": "0,01", "decremento_max": "0,03",
     "prob": "1", "espera_min": "0", "espera_max": "0",
-    "max_recotizaciones": "60", "intervalo_min": "10",
+    "sondeo": "1", "max_recotizaciones": "60",
 }
 
 
-class SesionFalsa:
-    def get(self, *a, **k): return ""
-    def subasta(self, ident): return ""
-    def cheques(self, ident): return ""
-
-
-def trabajador(tmp):
-    t = ui.Trabajador()
-    t.eco = False
-    t.sesion = SesionFalsa()      # el arranque exige sesion conectada
-    ui.AQUI = tmp                 # los logs de prueba no van al repo
-    return t
-
-
-class TestArrancar(unittest.TestCase):
+class Base(unittest.TestCase):
     def setUp(self):
-        import tempfile
         self.tmp = Path(tempfile.mkdtemp())
         self.original = ui.AQUI
-        self.t = trabajador(self.tmp)
+        ui.AQUI = self.tmp            # los logs de prueba no van al repo
+        self.t = ui.Trabajador()
+        self.t.eco = False
 
     def tearDown(self):
         ui.AQUI = self.original
         if self.t.log:
             self.t.log.cerrar()
 
-    def test_arranca_en_sombra_por_defecto(self):
-        self.t._arrancar(dict(BUENA))
-        self.assertTrue(self.t.estado["corriendo"])
-        self.assertEqual(self.t.estado["modo"], "sombra")
-        self.assertFalse(self.t.ciclo.vivo)
+    def con_sesion(self):
+        self.t.sesion = SesionFalsa()
+        self.t._tras_ingreso(None)
+        return self.t
+
+
+class TestSinSesion(Base):
+    def test_no_se_puede_sumar_una_subasta(self):
+        with self.assertRaises(ErrorDePlataforma):
+            self.t._sumar(dict(BUENA))
+        self.assertIsNone(self.t.mesa)
+
+    def test_no_se_puede_mirar(self):
+        with self.assertRaises(ErrorDePlataforma):
+            self.t._mirar(900)
+
+    def test_el_error_llega_a_la_pantalla_y_no_tumba_el_hilo(self):
+        self.t.pedir("sumar", **BUENA)
+        self.t._atender()
+        self.assertIn("ingres", self.t.estado["aviso"].lower())
+
+
+class TestMesaDesdeLaInterfaz(Base):
+    def test_suma_varias_subastas(self):
+        t = self.con_sesion()
+        for ident in (100, 200, 300):
+            t._sumar({**BUENA, "ident": ident})
+        self.assertEqual(len(t.mesa.activos), 3)
+
+    def test_sombra_por_defecto(self):
+        t = self.con_sesion()
+        t._sumar(dict(BUENA))
+        self.assertFalse(t.mesa.vigilantes[1556714].vivo)
 
     def test_vivo_solo_si_se_pide(self):
-        self.t._arrancar({**BUENA, "vivo": True})
-        self.assertEqual(self.t.estado["modo"], "vivo")
-        self.assertTrue(self.t.ciclo.vivo)
+        t = self.con_sesion()
+        t._sumar({**BUENA, "vivo": True})
+        self.assertTrue(t.mesa.vigilantes[1556714].vivo)
 
-    def test_config_invalida_no_arranca_nada(self):
-        from motor.config import ConfigInvalida
+    def test_config_invalida_no_suma_nada(self):
+        t = self.con_sesion()
         with self.assertRaises(ConfigInvalida):
-            self.t._arrancar({**BUENA, "piso": "9999,00"})
-        self.assertFalse(self.t.estado["corriendo"])
-        self.assertIsNone(self.t.ciclo)
+            t._sumar({**BUENA, "piso": "9999,00"})
+        self.assertEqual(t.mesa.activos, [])
 
-    def test_piso_ilegible_no_arranca_nada(self):
-        from motor.libro import LibroIlegible
+    def test_piso_ilegible_no_suma_nada(self):
+        t = self.con_sesion()
         with self.assertRaises(LibroIlegible):
-            self.t._arrancar({**BUENA, "piso": "veinticinco"})
-        self.assertIsNone(self.t.ciclo)
+            t._sumar({**BUENA, "piso": "veinticinco"})
+        self.assertEqual(t.mesa.activos, [])
 
-    def test_sin_sesion_no_arranca(self):
-        self.t.sesion = None
-        self.t._arrancar(dict(BUENA))
-        self.assertFalse(self.t.estado["corriendo"])
-        self.assertIsNone(self.t.ciclo)
-        self.assertIn("ingres", self.t.estado["aviso"])
+    def test_sondeo_demasiado_rapido_se_rechaza(self):
+        t = self.con_sesion()
+        with self.assertRaises(ConfigInvalida):
+            t._sumar({**BUENA, "sondeo": "0.1"})
 
-    def test_parar_activa_el_kill_switch(self):
-        self.t._arrancar(dict(BUENA))
-        self.t._frenar("parado a mano")
-        self.assertFalse(self.t.estado["corriendo"])
-        self.assertTrue(self.t.ciclo.detenido)
+    def test_parar_frena_todas(self):
+        t = self.con_sesion()
+        for ident in (100, 200):
+            t._sumar({**BUENA, "ident": ident, "vivo": True})
+        t._despachar("parar", {})
+        self.assertEqual(t.mesa.activos, [])
+
+    def test_sacar_deja_las_demas(self):
+        t = self.con_sesion()
+        for ident in (100, 200):
+            t._sumar({**BUENA, "ident": ident})
+        t._despachar("sacar", {"ident": 100})
+        self.assertEqual([v.cfg.ident for v in t.mesa.activos], [200])
 
 
-class TestLibroJson(unittest.TestCase):
-    def _libro(self, filas):
-        return parsear_libro(armar_html(900, filas))
+class TestEstadoQueVeLaPantalla(Base):
+    def test_la_contraseña_no_se_filtra(self):
+        # Se prueba contra el estado que realmente sirve el servidor. La sesion
+        # se sustituye para que el test no salga a la red.
+        from motor.sesion import IngresoRechazado
 
-    def test_ordena_por_tasa_y_marca_la_propia(self):
-        libro = self._libro([
-            {"id": 1, "ag": "442", "tasa": "26,00", "hora": "10:00:00", "propia": True},
-            {"id": 2, "ag": "999", "tasa": "25,50", "hora": "10:01:00", "propia": False},
-        ])
-        j = ui.Trabajador._libro_json(libro)
-        self.assertEqual([o["tasa"] for o in j["ofertas"]], ["25,50", "26,00"])
-        self.assertTrue(j["ofertas"][1]["propia"])
-        self.assertEqual(j["mia"], "26,00")
-        self.assertEqual(j["mejor_ajena"], "25,50")
-        self.assertFalse(j["gano"])
+        class Rechaza(SesionFalsa):
+            def __init__(self, *a, **kw):
+                super().__init__()
 
-    def test_marca_cuando_vas_ganando(self):
-        libro = self._libro([
-            {"id": 1, "ag": "442", "tasa": "25,00", "hora": "10:00:00", "propia": True},
-            {"id": 2, "ag": "999", "tasa": "25,50", "hora": "10:01:00", "propia": False},
-        ])
-        self.assertTrue(ui.Trabajador._libro_json(libro)["gano"])
+            def ingresar(self, usuario, clave):
+                raise IngresoRechazado("credenciales incorrectas")
 
-    def test_sin_oferta_propia_no_gana(self):
-        libro = self._libro([
-            {"id": 2, "ag": "999", "tasa": "25,50", "hora": "10:01:00", "propia": False},
-        ])
-        j = ui.Trabajador._libro_json(libro)
-        self.assertIsNone(j["mia"])
-        self.assertFalse(j["gano"])
+        original, ui.Sesion = ui.Sesion, Rechaza
+        try:
+            self.t.pedir("ingresar", usuario="lautaro", clave="NOAPARECER123")
+            self.t._atender()
+        finally:
+            ui.Sesion = original
+        self.assertNotIn("NOAPARECER123", str(self.t.leer_estado()))
+        self.assertIn("incorrect", self.t.estado["aviso"])
+
+    def test_lista_las_subastas_con_su_fase(self):
+        t = self.con_sesion()
+        t._sumar({**BUENA, "ident": 100})
+        vistas = t.leer_estado()["subastas"]
+        self.assertEqual(len(vistas), 1)
+        self.assertEqual(vistas[0]["ident"], 100)
+        self.assertIn("fase", vistas[0])
+
+    def test_mirar_no_suma_a_la_mesa(self):
+        # "Mirar" es una lectura suelta: no pone a operar nada.
+        t = self.con_sesion()
+        t._mirar(1556714)
+        self.assertEqual(t.mesa.activos, [])
+        self.assertEqual(t.estado["mirado"]["ident"], 1556714)
 
 
 if __name__ == "__main__":

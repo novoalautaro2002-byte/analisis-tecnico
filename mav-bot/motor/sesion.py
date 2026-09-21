@@ -14,6 +14,7 @@ entro se resuelve releyendo el libro, no mandandola de nuevo.
 from __future__ import annotations
 
 import http.cookiejar
+import json
 import re
 import time as reloj
 import urllib.error
@@ -44,9 +45,6 @@ _META_REFRESH = re.compile(
     r"""content=["'][^"']*url\s*=\s*([^"'>\s]+)""", re.I)
 
 
-def destino_refresh(html: str) -> str | None:
-    m = _META_REFRESH.search(html)
-    return m.group(1) if m else None
 _ERROR = re.compile(
     r"(usuario o contrase|incorrect\w*|inhibid\w*|expirad\w*|bloquead\w*|"
     r"sesi\w+ activa|ya se encuentra)", re.I)
@@ -64,6 +62,11 @@ _MARCAS_2FA = re.compile(
 # positivo de inhibicion en cada ingreso.
 _AYUDA = re.compile(
     r"<div[^>]*id=[\"']?deshinibhir-modal.*?</div>\s*</div>", re.I | re.S)
+
+
+def destino_refresh(html: str) -> str | None:
+    m = _META_REFRESH.search(html)
+    return m.group(1) if m else None
 
 
 def pide_codigo(html: str) -> bool:
@@ -265,6 +268,38 @@ class Sesion:
 
     def subasta(self, ident: int) -> str:
         return self.get("cpd-versubasta.r", ident=ident)
+
+    def estado_subasta(self, ident: int) -> dict | None:
+        """Ficha de la subasta, del endpoint JSON del listado.
+
+        Sirve para saber si sigue activa. Es informativo: si falla, se sigue
+        sin el dato en vez de romper la pantalla del libro.
+        """
+        try:
+            crudo = self.get("cpd-subastas-api.p", **{
+                "p-ident": ident, "p-estado": "Todas",
+                "p-subasta": "", "p-segmento": "", "p-instrumento": "",
+                "p-moneda": "", "p-sgr": "", "p-plazo": "", "p-cuit": "",
+                "p-montoDesde": "", "p-montoHasta": "",
+                "p-ppvdesde": "", "p-ppvhasta": "",
+            })
+            filas = json.loads(crudo).get("work-json") or []
+        except (ErrorDePlataforma, SesionCaida, json.JSONDecodeError,
+                AttributeError, TypeError):
+            return None
+        for fila in filas:
+            if str(fila.get("ident", "")).strip() == str(ident):
+                return fila
+        return None
+
+    def ofertas_compra(self, ident: int) -> str:
+        """El iframe de ofertas de compra de la pantalla de subasta.
+
+        La pantalla arma el libro con un array propio, pero además carga este
+        iframe. Hace falta para entender por qué una oferta propia a veces no
+        se reconoce como tal.
+        """
+        return self.get("cpd-of-compra-i.r", ident=ident)
 
     def cheques(self, ident: int) -> str:
         return self.get("cpd-ch-subasta-i-v2.r", ident=ident)

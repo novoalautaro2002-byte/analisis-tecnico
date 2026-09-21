@@ -17,6 +17,10 @@ from .libro import PASO
 TASA_MIN_ABSOLUTA = Decimal("-50")
 TASA_MAX_ABSOLUTA = Decimal("500")
 
+# Piso del sondeo. Mas rapido que esto no trae informacion nueva — el servidor
+# no actualiza mas seguido — y solo suma carga y visibilidad.
+PISO_SONDEO_S = 1.0
+
 
 class ConfigInvalida(Exception):
     pass
@@ -56,8 +60,21 @@ class ConfigSubasta:
     max_recotizaciones: int = 60
     """Tope por subasta y por sesion. Cualquier loop se choca contra esto."""
 
-    intervalo_min_s: float = 10.0
-    """Piso de tiempo entre dos recotizaciones de la misma subasta."""
+    sondeo_s: float = 2.0
+    """Cada cuanto releer el libro cuando no hay nada que hacer.
+
+    Es la latencia real de reaccion: si el rival te pisa justo despues de una
+    lectura, el bot se entera recien en la siguiente. Bajarlo acelera y cuesta
+    requests; el piso lo pone PISO_SONDEO_S.
+    """
+
+    intervalo_min_s: float = 0.0
+    """Piso de tiempo entre dos recotizaciones de la misma subasta.
+
+    Arranca en cero a proposito: el ritmo lo manda la espera configurada. Un
+    piso escondido aca hacia que pedir "1 segundo" tardara diez, porque el gate
+    bloqueaba la recotizacion sin que se viera por que.
+    """
 
     antiguedad_max_libro_s: float = 30.0
     """Si la ultima lectura del libro es mas vieja que esto, no se cotiza.
@@ -86,5 +103,8 @@ class ConfigSubasta:
             raise ConfigInvalida("max_recotizaciones tiene que ser positivo")
         if self.intervalo_min_s < 0:
             raise ConfigInvalida("intervalo_min_s no puede ser negativo")
+        if self.sondeo_s < PISO_SONDEO_S:
+            raise ConfigInvalida(
+                f"el sondeo no puede bajar de {PISO_SONDEO_S}s")
         if self.antiguedad_max_libro_s <= 0:
             raise ConfigInvalida("antiguedad_max_libro_s tiene que ser positivo")

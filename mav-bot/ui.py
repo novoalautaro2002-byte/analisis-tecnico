@@ -3,16 +3,16 @@
 
     python ui.py
 
-Levanta un servidor en tu maquina y abre el navegador. Solo biblioteca estandar:
-no hay nada que instalar.
+Levanta un servidor en tu máquina y abre el navegador. Solo biblioteca
+estándar: no hay nada que instalar.
 
-No maneja ningun navegador: le habla directo a la plataforma. El ingreso se hace
-en esta misma pantalla, con el 2FA de siempre. La contraseña y el codigo viven
-en memoria el tiempo que dura el pedido y no se escriben en ningun archivo ni en
+No maneja ningún navegador: le habla directo a la plataforma. El ingreso se hace
+en esta misma pantalla, con el 2FA de siempre. La contraseña y el código viven
+en memoria el tiempo que dura el pedido y no se escriben en ningún archivo ni en
 el log.
 
-El servidor escucha solo en 127.0.0.1: desde esta pantalla se lanzan ordenes
-reales, no tiene por que llegarle nadie de afuera.
+El servidor escucha solo en 127.0.0.1: desde esta pantalla se lanzan órdenes
+reales, no tiene por qué llegarle nadie de afuera.
 """
 
 from __future__ import annotations
@@ -22,21 +22,17 @@ import queue
 import threading
 import time as reloj
 import webbrowser
+from dataclasses import asdict
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from motor.ciclo_http import Ciclo
 from motor.config import ConfigInvalida, ConfigSubasta
-from motor.formulario import CampoProhibido, FormularioIlegible
+from motor.formulario import CampoProhibido, FormularioIlegible, parsear_campos
 from motor.libro import LibroIlegible, formatear_tasa, parsear_libro, parsear_tasa
+from motor.mesa import Mesa
 from motor.registro import Registro
-from motor.sesion import (
-    ErrorDePlataforma,
-    IngresoRechazado,
-    Sesion,
-    SesionCaida,
-)
+from motor.sesion import ErrorDePlataforma, IngresoRechazado, Sesion, SesionCaida
 
 AQUI = Path(__file__).parent
 PUERTO = 8733
@@ -52,18 +48,15 @@ class Trabajador(threading.Thread):
         self.ordenes: queue.Queue = queue.Queue()
         self.candado = threading.Lock()
         self.sesion: Sesion | None = None
-        self.ciclo: Ciclo | None = None
+        self.mesa: Mesa | None = None
         self.log: Registro | None = None
         self.salir = False
         self.eco = True          # los tests lo apagan
         self.estado = {
             "sesion": False,
             "pendiente": [],
-            "corriendo": False,
-            "modo": None,
-            "subasta": None,
-            "libro": None,
-            "recotizaciones": 0,
+            "subastas": [],
+            "mirado": None,
             "aviso": None,
             "log": [],
         }
@@ -73,9 +66,11 @@ class Trabajador(threading.Thread):
     def leer_estado(self) -> dict:
         with self.candado:
             e = dict(self.estado)
-            if self.log is not None:
-                e["log"] = list(self.log.recientes)[-60:]
-            return e
+        if self.mesa is not None:
+            e["subastas"] = [asdict(v) for v in self.mesa.vistas()]
+        if self.log is not None:
+            e["log"] = list(self.log.recientes)[-80:]
+        return e
 
     def _set(self, **kw) -> None:
         with self.candado:
@@ -89,15 +84,11 @@ class Trabajador(threading.Thread):
     def run(self) -> None:
         while not self.salir:
             self._atender()
-            if self.ciclo is not None and self.estado["corriendo"]:
-                try:
-                    self._una_vuelta()
-                except Exception as e:
-                    # Cualquier sorpresa frena las cotizaciones: es preferible
-                    # quedarse quieto a seguir con un estado que no entendemos.
-                    self._frenar(f"error inesperado: {e}")
+            if self.mesa is not None and self.mesa.activos:
+                if not self.mesa.tick():
+                    reloj.sleep(self.mesa.dormir_hasta())
             else:
-                reloj.sleep(0.3)
+                reloj.sleep(0.2)
 
     def _atender(self) -> None:
         while True:
@@ -106,69 +97,92 @@ class Trabajador(threading.Thread):
             except queue.Empty:
                 return
             try:
-                if orden == "ingresar":
-                    self._ingresar(datos.get("usuario", ""), datos.get("clave", ""))
-                elif orden == "codigo":
-                    self._codigo(datos.get("valores") or {})
-                elif orden == "sesion":
-                    self._conectar(datos.get("cookie", ""))
-                elif orden == "detalle":
-                    self._detalle(int(datos.get("ident") or 0))
-                elif orden == "arrancar":
-                    self._arrancar(datos)
-                elif orden == "parar":
-                    self._frenar("parado a mano")
+                self._despachar(orden, datos)
             except (ConfigInvalida, LibroIlegible, ErrorDePlataforma, SesionCaida,
                     FormularioIlegible, CampoProhibido, IngresoRechazado) as e:
                 self._set(aviso=str(e))
             except Exception as e:
                 self._set(aviso=f"error: {e}")
 
-    def _ingresar(self, usuario: str, clave: str) -> None:
-        """Usuario y contraseña.
+    def _despachar(self, orden: str, datos: dict) -> None:
+        if orden == "ingresar":
+            self._ingresar(datos.get("usuario", ""), datos.get("clave", ""))
+        elif orden == "codigo":
+            self._codigo(datos.get("valores") or {})
+        elif orden == "mirar":
+            self._mirar(int(datos.get("ident") or 0))
+        elif orden == "sumar":
+            self._sumar(datos)
+        elif orden == "sacar":
+            self._exige_mesa().sacar(int(datos["ident"]))
+        elif orden == "parar":
+            self._exige_mesa().parar_todo()
+            self._set(aviso="Parado.")
+        elif orden == "diagnostico":
+            self._diagnostico(int(datos.get("ident") or 0))
 
-        Ni la clave ni el codigo entran nunca al estado ni al log: viven en la
-        llamada y se van con ella.
-        """
-        # Si no entiende la respuesta, la guarda en logs/ para poder mirarla.
+    # -- sesión ------------------------------------------------------------
+
+    def _ingresar(self, usuario: str, clave: str) -> None:
+        """Ni la clave ni el código entran al estado ni al log."""
         sesion = Sesion(guardar_en=AQUI / "logs" / "x")
         pendiente = sesion.ingresar(usuario, clave)
         self.sesion = sesion
-        if pendiente is None:
-            self._set(sesion=True, pendiente=[], aviso="Sesión iniciada.")
-        else:
-            self._set(sesion=False, pendiente=list(pendiente.campos),
-                      aviso=pendiente.mensaje)
+        self._tras_ingreso(pendiente)
 
     def _codigo(self, valores: dict) -> None:
         if self.sesion is None:
             self._set(aviso="Primero ingresá usuario y contraseña.")
             return
-        pendiente = self.sesion.continuar({k: str(v) for k, v in valores.items()})
-        if pendiente is None:
-            self._set(sesion=True, pendiente=[], aviso="Sesión iniciada.")
-        else:
-            self._set(pendiente=list(pendiente.campos), aviso=pendiente.mensaje)
+        self._tras_ingreso(
+            self.sesion.continuar({k: str(v) for k, v in valores.items()}))
 
-    def _conectar(self, texto: str) -> None:
-        sesion = Sesion.desde_texto(texto)
-        # Se prueba antes de darla por buena: una cookie vencida que parece
-        # valida es peor que no tener ninguna.
-        sesion.get("cpd-subastas-listado.r")
-        self.sesion = sesion
-        self._set(sesion=True, aviso="Sesión OK.")
-
-    def _detalle(self, ident: int) -> None:
-        if self.sesion is None:
-            self._set(aviso="Primero ingresá a la plataforma.")
+    def _tras_ingreso(self, pendiente) -> None:
+        if pendiente is not None:
+            self._set(sesion=False, pendiente=list(pendiente.campos),
+                      aviso=pendiente.mensaje)
             return
-        libro = parsear_libro(self.sesion.subasta(ident))
-        self._set(subasta=ident, libro=self._libro_json(libro), aviso=None)
+        ruta = AQUI / "logs" / f"mesa_{datetime.now():%Y%m%d_%H%M%S}.jsonl"
+        self.log = Registro(ruta, eco=self.eco)
+        self.mesa = Mesa(self.sesion, self.log)
+        self._set(sesion=True, pendiente=[], aviso="Sesión iniciada.")
 
-    def _arrancar(self, datos: dict) -> None:
+    def _exige_sesion(self) -> Sesion:
         if self.sesion is None:
-            self._set(aviso="Primero ingresá a la plataforma.")
-            return
+            raise ErrorDePlataforma("Primero ingresá a la plataforma.")
+        return self.sesion
+
+    def _exige_mesa(self) -> Mesa:
+        self._exige_sesion()
+        if self.mesa is None:
+            raise ErrorDePlataforma("Primero ingresá a la plataforma.")
+        return self.mesa
+
+    # -- subastas ----------------------------------------------------------
+
+    def _mirar(self, ident: int) -> None:
+        """Una lectura suelta, para ver cómo está parada la puja."""
+        sesion = self._exige_sesion()
+        libro = parsear_libro(sesion.subasta(ident))
+        mia = libro.mejor_propia()
+        ajena = libro.mejor_ajena()
+        ficha = sesion.estado_subasta(ident) or {}
+        self._set(mirado={
+            "ident": ident,
+            "estado": str(ficha.get("estado") or "").strip() or None,
+            "segmento": str(ficha.get("segmento") or "").strip() or None,
+            "mia": formatear_tasa(mia.tasa) if mia else None,
+            "mejor_ajena": formatear_tasa(ajena.tasa) if ajena else None,
+            "gano": bool(mia and (not ajena or mia.tasa < ajena.tasa)),
+            "ofertas": [
+                {"id": o.id, "agente": o.agente, "tasa": formatear_tasa(o.tasa),
+                 "hora": o.ingreso.strftime("%H:%M:%S"), "propia": o.propia}
+                for o in sorted(libro.ofertas, key=lambda o: (o.tasa, o.ingreso))
+            ],
+        }, aviso=None)
+
+    def _sumar(self, datos: dict) -> None:
+        mesa = self._exige_mesa()
         cfg = ConfigSubasta(
             ident=int(datos["ident"]),
             piso=parsear_tasa(datos["piso"]),
@@ -177,55 +191,60 @@ class Trabajador(threading.Thread):
             prob_respuesta=float(datos["prob"]),
             espera_min_s=float(datos["espera_min"]),
             espera_max_s=float(datos["espera_max"]),
+            sondeo_s=float(datos["sondeo"]),
             max_recotizaciones=int(datos["max_recotizaciones"]),
-            intervalo_min_s=float(datos["intervalo_min"]),
         )
-        vivo = bool(datos.get("vivo"))
-        ruta = AQUI / "logs" / (f"subasta_{cfg.ident}_"
-                                f"{datetime.now():%Y%m%d_%H%M%S}.jsonl")
-        self.log = Registro(ruta, eco=self.eco)
-        self.ciclo = Ciclo(cfg, self.sesion, vivo=vivo, log=self.log)
-        self.log("arranque", f"arranco en modo {'VIVO' if vivo else 'SOMBRA'}",
-                 config=str(cfg))
-        self._set(corriendo=True, modo="vivo" if vivo else "sombra",
-                  subasta=cfg.ident, recotizaciones=0, aviso=None)
+        mesa.sumar(cfg, vivo=bool(datos.get("vivo")))
+        self._set(aviso=None)
 
-    def _frenar(self, motivo: str) -> None:
-        if self.ciclo is not None:
-            self.ciclo.parar()
-        if self.log is not None:
-            self.log("parada", motivo)
-        self._set(corriendo=False, aviso=motivo)
+    # -- diagnóstico -------------------------------------------------------
 
-    def _una_vuelta(self) -> None:
-        paso = self.ciclo.tick()
-        datos = {"recotizaciones": self.ciclo.estado.recotizaciones.get(
-            self.ciclo.cfg.ident, 0)}
-        if paso.libro is not None:
-            datos["libro"] = self._libro_json(paso.libro)
-        self._set(**datos)
+    def _diagnostico(self, ident: int) -> None:
+        """Guarda lo que el bot ve de una subasta y resume su lectura.
 
-        if paso.terminal:
-            self._set(corriendo=False,
-                      aviso=f"{paso.resultado.value}: {paso.detalle}")
-            return
-        self.ciclo.dormir(self.ciclo.pausa_sugerida)
+        Existe porque la detección de ofertas propias depende de cómo MAV
+        renderiza la columna de baja, y eso solo se corrige mirando el HTML de
+        un caso real en vez de deducirlo.
+        """
+        sesion = self._exige_sesion()
+        carpeta = AQUI / "logs"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        sello = f"{ident}_{datetime.now():%Y%m%d_%H%M%S}"
+
+        paginas = {
+            "subasta": ("cpd-versubasta.r", lambda: sesion.subasta(ident)),
+            "ofertas-compra": ("cpd-of-compra-i.r", lambda: sesion.ofertas_compra(ident)),
+            "cheques": ("cpd-ch-subasta-i-v2.r", lambda: sesion.cheques(ident)),
+        }
+        guardados, filas = [], []
+        for nombre, (_, traer) in paginas.items():
+            try:
+                html = traer()
+            except (ErrorDePlataforma, SesionCaida) as e:
+                filas.append(f"{nombre}: no se pudo leer ({e})")
+                continue
+            ruta = carpeta / f"diag_{sello}_{nombre}.html"
+            ruta.write_text(html, encoding="latin-1", errors="replace")
+            guardados.append(ruta.name)
+            if nombre == "subasta":
+                filas.extend(self._resumen_libro(html))
+
+        self._set(mirado=None, aviso=" | ".join(filas) +
+                  f"  →  guardado en logs/: {', '.join(guardados)}")
 
     @staticmethod
-    def _libro_json(libro) -> dict:
-        mia = libro.mejor_propia()
-        ajena = libro.mejor_ajena()
-        return {
-            "ident": libro.ident,
-            "ofertas": [
-                {"id": o.id, "agente": o.agente, "tasa": formatear_tasa(o.tasa),
-                 "hora": o.ingreso.strftime("%H:%M:%S"), "propia": o.propia}
-                for o in sorted(libro.ofertas, key=lambda o: (o.tasa, o.ingreso))
-            ],
-            "mia": formatear_tasa(mia.tasa) if mia else None,
-            "mejor_ajena": formatear_tasa(ajena.tasa) if ajena else None,
-            "gano": bool(mia and (not ajena or mia.tasa < ajena.tasa)),
-        }
+    def _resumen_libro(html: str) -> list[str]:
+        try:
+            libro = parsear_libro(html)
+        except LibroIlegible as e:
+            return [f"no entiendo el libro: {e}"]
+        campos = parsear_campos(html)
+        filas = [f"subasta {libro.ident}, {len(libro.ofertas)} oferta(s)"]
+        for o in libro.ofertas:
+            filas.append(f"#{o.id} ag {o.agente} {formatear_tasa(o.tasa)} "
+                         f"{'CON' if o.propia else 'SIN'} link de baja")
+        filas.append(f"campos del form: {len(campos)}")
+        return filas
 
 
 TRABAJADOR = Trabajador()
@@ -263,10 +282,10 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return self._json({"error": "json invalido"}, 400)
 
-        rutas = {"/api/ingresar": "ingresar", "/api/codigo": "codigo",
-                 "/api/sesion": "sesion", "/api/detalle": "detalle",
-                 "/api/arrancar": "arrancar", "/api/parar": "parar"}
-        orden = rutas.get(self.path)
+        orden = {"/api/ingresar": "ingresar", "/api/codigo": "codigo",
+                 "/api/mirar": "mirar", "/api/sumar": "sumar",
+                 "/api/sacar": "sacar", "/api/parar": "parar",
+                 "/api/diagnostico": "diagnostico"}.get(self.path)
         if orden is None:
             return self._json({"error": "no existe"}, 404)
         TRABAJADOR.pedir(orden, **datos)
@@ -275,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main() -> int:
     TRABAJADOR.start()
-    # Solo loopback: la interfaz manda ordenes reales.
+    # Solo loopback: la interfaz manda órdenes reales.
     servidor = ThreadingHTTPServer(("127.0.0.1", PUERTO), Handler)
     url = f"http://127.0.0.1:{PUERTO}/"
     print(f"Interfaz del bot en {url}")
