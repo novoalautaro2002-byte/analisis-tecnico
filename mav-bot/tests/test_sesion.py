@@ -9,6 +9,7 @@ from motor.sesion import (
     Pendiente,
     Sesion,
     es_pantalla_de_login,
+    pide_codigo,
 )
 
 # La pantalla real: form a validar2.r con dos campos visibles y varios hidden.
@@ -22,13 +23,20 @@ LOGIN = """<html><head><title>Inicio de Sesi&oacute;n</title></head><body>
 <input type="hidden" name="metodo2fa" value="">
 </form></body></html>"""
 
-# El paso del codigo: sigue siendo la pantalla de login, sin campo password.
+# El paso del codigo. Sigue siendo la pantalla de login y CONSERVA el campo
+# password: por eso hace falta el marcador positivo (los ids del contador y el
+# boton de reenvio, que el login inicial no trae).
 CODIGO = """<html><head><title>Inicio de Sesi&oacute;n</title></head><body>
 <form method="POST" action="validar2.r">
 <input type="hidden" name="destino" value="/cgi-bin/x/mvr-usuarios.r">
 <input type="hidden" name="login" value="true">
 <input type="hidden" name="metodo2fa" value="mail">
+<input type="text" name="id" value="lautaro">
+<input type="password" name="password" value="">
+<div id="ingresarcodigo">Ingresá el código</div>
+<div id="tiempo"></div><input type="hidden" id="contador" value="120">
 <input type="text" name="codigo" value="">
+<button id="reenviar">Reenviar</button>
 </form></body></html>"""
 
 ADENTRO = ('<html><script>var myData = [];var myColumns=["Oferta"];</script>'
@@ -115,6 +123,22 @@ class TestRechazos(unittest.TestCase):
         with self.assertRaises(IngresoRechazado) as e:
             s.ingresar("lautaro", "secreta")
         self.assertIn("Master", str(e.exception))
+
+
+class TestDeteccionDelPasoDelCodigo(unittest.TestCase):
+    """El paso del codigo conserva el campo password, asi que no sirve de
+    discriminante. Se detecta por los elementos que solo existen ahi."""
+
+    def test_el_login_inicial_no_pide_codigo(self):
+        self.assertFalse(pide_codigo(LOGIN))
+
+    def test_el_paso_del_codigo_se_reconoce(self):
+        self.assertTrue(pide_codigo(CODIGO))
+
+    def test_lo_reconoce_aunque_conserve_el_password(self):
+        self.assertIn('name="password"', CODIGO)
+        s = SesionFalsa([LOGIN, CODIGO])
+        self.assertEqual(s.ingresar("lautaro", "secreta").campos, ("codigo",))
 
 
 class TestDeteccionDeLogin(unittest.TestCase):

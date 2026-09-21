@@ -15,10 +15,12 @@ from __future__ import annotations
 
 import http.cookiejar
 import re
+import time as reloj
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from .formulario import FormularioIlegible, parsear_form
 
@@ -34,7 +36,19 @@ NAVEGADOR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 _PANTALLA_LOGIN = re.compile(r"validar2\.r|Inicio de Sesi", re.I)
 _COOKIE = re.compile(r"(mvrcookie|mvrusername)\s*=\s*([^;,\s]+)")
 _ERROR = re.compile(
-    r"(usuario o contrase|incorrect\w*|inhibid\w*|expirad\w*|bloquead\w*)", re.I)
+    r"(usuario o contrase|incorrect\w*|inhibid\w*|expirad\w*|bloquead\w*|"
+    r"sesi\w+ activa|ya se encuentra)", re.I)
+
+# Elementos que SOLO existen en el paso del codigo: el login inicial no los
+# trae. Es un marcador positivo, mucho mas confiable que mirar si sigue
+# habiendo un campo password — el paso del codigo lo conserva.
+_MARCAS_2FA = re.compile(
+    r"""id=["']?(ingresarcodigo|reenviocodigo|codigoincorrecto|"""
+    r"""codigoexpirado|contador|reenviar|contexpir|tiempoexpir)["']?""", re.I)
+
+
+def pide_codigo(html: str) -> bool:
+    return bool(_MARCAS_2FA.search(html))
 
 
 class SesionCaida(Exception):
@@ -64,6 +78,7 @@ class Pendiente:
 @dataclass
 class Sesion:
     tiempo_max_s: float = 20.0
+    guardar_en: Path | None = None
     jar: http.cookiejar.CookieJar = field(default_factory=http.cookiejar.CookieJar)
     _abridor: urllib.request.OpenerDirector | None = field(default=None, repr=False)
     _paso: object | None = field(default=None, repr=False)
@@ -107,29 +122,41 @@ class Sesion:
 
         error = _texto_de_error(_ERROR.search(html))
 
-        # Si vuelve a pedir la contraseña, no es un paso siguiente: es un
-        # rechazo. El formulario del codigo no trae campo password.
+        if pide_codigo(html):
+            try:
+                form = parsear_form(html)
+            except FormularioIlegible:
+                raise IngresoRechazado(error or self._sin_entender(html))
+            # Campos visibles sin valor, sin contar los del login que ya
+            # mandamos: eso es lo que el servidor esta pidiendo ahora.
+            faltan = tuple(c for c in form.visibles
+                           if c not in ("id", "password")
+                           and not (form.campos.get(c) or "").strip())
+            if faltan:
+                self._paso = (form.action or accion, dict(form.campos))
+                return Pendiente(campos=faltan,
+                                 mensaje=error or "Te mandaron el código.")
+
+        self._paso = None
+        raise IngresoRechazado(error or self._sin_entender(html))
+
+    def _sin_entender(self, html: str) -> str:
+        """Guarda la respuesta para poder mirarla, en vez de adivinar.
+
+        Es la pagina de login de la plataforma, sin contraseñas: lo unico que
+        puede traer es el nombre de usuario.
+        """
+        if self.guardar_en is None:
+            return "la plataforma no acepto el ingreso"
         try:
-            parsear_form(html, con_campo="password")
-        except FormularioIlegible:
-            pass
-        else:
-            self._paso = None
-            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
-
-        try:
-            form = parsear_form(html)
-        except FormularioIlegible:
-            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
-
-        # Campos visibles que todavia no tienen valor: eso es lo que falta.
-        faltan = tuple(c for c in form.visibles
-                       if not (form.campos.get(c) or "").strip())
-        if not faltan:
-            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
-
-        self._paso = (form.action or accion, dict(form.campos))
-        return Pendiente(campos=faltan, mensaje=error or "Falta completar el código.")
+            self.guardar_en.parent.mkdir(parents=True, exist_ok=True)
+            ruta = self.guardar_en.with_name(
+                f"ingreso_{int(reloj.time())}.html")
+            ruta.write_text(html, encoding=CODIFICACION, errors="replace")
+            return (f"No entendí la respuesta de la plataforma. La guardé en "
+                    f"{ruta.name} para poder mirarla.")
+        except Exception:
+            return "la plataforma no acepto el ingreso"
 
     def adentro(self) -> bool:
         """Confirma contra una pantalla real, no contra la respuesta del login."""

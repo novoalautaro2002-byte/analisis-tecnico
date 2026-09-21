@@ -130,7 +130,8 @@ class Trabajador(threading.Thread):
         Ni la clave ni el codigo entran nunca al estado ni al log: viven en la
         llamada y se van con ella.
         """
-        sesion = Sesion()
+        # Si no entiende la respuesta, la guarda en logs/ para poder mirarla.
+        sesion = Sesion(guardar_en=AQUI / "logs" / "x")
         pendiente = sesion.ingresar(usuario, clave)
         self.sesion = sesion
         if pendiente is None:
