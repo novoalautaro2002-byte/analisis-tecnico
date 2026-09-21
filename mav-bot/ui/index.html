@@ -101,6 +101,7 @@
         <label for="ident">Número</label>
         <input id="ident" inputmode="numeric" placeholder="1556714">
       </div>
+      <button id="btn-abrir" class="neutro">Abrir en Chrome</button>
       <button id="btn-detalle" class="neutro">Traer detalle</button>
     </div>
     <div id="detalle" style="margin-top:16px"></div>
@@ -197,6 +198,12 @@ function parametros(vivo) {
     vivo: vivo,
   };
 }
+
+$('btn-abrir').onclick = () => {
+  const ident = $('ident').value.trim();
+  if (!ident) return;
+  pedir('/api/abrir', {ident});
+};
 
 $('btn-detalle').onclick = () => {
   const ident = $('ident').value.trim();

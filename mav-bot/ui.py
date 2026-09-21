@@ -36,6 +36,8 @@ except ImportError:  # pragma: no cover
 
 AQUI = Path(__file__).parent
 CDP = "http://localhost:9222"
+BASE = ("https://trading.mav-sa.com.ar/cgi-bin/wspd_cgi.sh/"
+        "WService=wsbroker1/cpd-versubasta.r?ident={ident}")
 PUERTO = 8733
 
 
@@ -121,6 +123,8 @@ class Trabajador(threading.Thread):
                     self._detalle(navegador, datos["ident"])
                 elif orden == "arrancar":
                     self._arrancar(datos)
+                elif orden == "abrir":
+                    self._abrir(navegador, datos["ident"])
                 elif orden == "parar":
                     self._frenar("parado a mano")
             except (ConfigInvalida, LibroIlegible) as e:
@@ -136,13 +140,35 @@ class Trabajador(threading.Thread):
         if marco is None:
             self._set(libro=None, subasta=ident,
                       aviso=f"No encuentro la subasta {ident} abierta en Chrome. "
-                            f"Abrila ahi y volve a probar.")
+                            f"Usa \u201cAbrir en Chrome\u201d, o abrila vos y volve "
+                            f"a traer el detalle.")
             return
         libro = leer_libro(marco, self.log or (lambda *a, **k: None))
         if libro is None:
             self._set(libro=None, aviso="No pude leer esa pantalla.")
             return
         self._set(subasta=ident, libro=self._libro_json(libro), aviso=None)
+
+    def _abrir(self, navegador, ident: int) -> None:
+        """Abre la subasta en una pestaña nueva del Chrome enganchado.
+
+        Pestaña nueva y no navegacion de la actual: no le movemos la pantalla
+        donde el trader esta trabajando. Es una lectura — la misma pagina que
+        abriria el a mano — y despues se trae el detalle.
+        """
+        if navegador is None:
+            self._set(aviso="Chrome no esta enganchado todavia.")
+            return
+        if not navegador.contexts:
+            self._set(aviso="No hay ninguna ventana de Chrome abierta.")
+            return
+        try:
+            pagina = navegador.contexts[0].new_page()
+            pagina.goto(BASE.format(ident=ident), wait_until="load", timeout=30000)
+        except Exception as e:
+            self._set(aviso=f"No pude abrir la subasta {ident}: {e}")
+            return
+        self._detalle(navegador, ident)
 
     def _arrancar(self, datos: dict) -> None:
         cfg = ConfigSubasta(
@@ -246,6 +272,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/detalle":
             TRABAJADOR.pedir("detalle", ident=int(datos.get("ident") or 0))
+        elif self.path == "/api/abrir":
+            TRABAJADOR.pedir("abrir", ident=int(datos.get("ident") or 0))
         elif self.path == "/api/arrancar":
             TRABAJADOR.pedir("arrancar", **datos)
         elif self.path == "/api/parar":
