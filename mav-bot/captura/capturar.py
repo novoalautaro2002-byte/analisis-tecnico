@@ -110,25 +110,35 @@ class Captura:
         return True
 
 
-def paginas_mav(navegador, filtro: str | None):
-    """Todas las pestañas abiertas de la plataforma, opcionalmente filtradas.
+def marcos_mav(navegador, filtro: str | None):
+    """Todos los frames de la plataforma que haya abiertos.
+
+    La plataforma es un frameset: lo que ves en pantalla son cinco documentos
+    (cabecera, los dos laterales, el pie, y el contenido en FS_main). El
+    documento de la pestaña es solo el <frameset>, que no cambia nunca; lo que
+    hay que leer es cada frame por separado.
 
     Se recorre en cada vuelta y no se cachea: la plataforma se auto-refresca y
     vos vas a ir navegando entre pantallas mientras esto corre.
     """
-    encontradas = []
+    encontrados = []
     for contexto in navegador.contexts:
         for pagina in contexto.pages:
             try:
-                url = pagina.url
+                marcos = list(pagina.frames)
             except Exception:
                 continue
-            if DOMINIO not in url:
-                continue  # jamas tocamos una pestaña que no sea de la plataforma
-            if filtro and filtro.lower() not in url.lower():
-                continue
-            encontradas.append((pagina, url))
-    return encontradas
+            for marco in marcos:
+                try:
+                    url = marco.url
+                except Exception:
+                    continue
+                if DOMINIO not in url:
+                    continue  # jamas tocamos algo que no sea de la plataforma
+                if filtro and filtro.lower() not in url.lower():
+                    continue
+                encontrados.append((marco, url))
+    return encontrados
 
 
 def main() -> int:
@@ -155,13 +165,17 @@ def main() -> int:
 
         print(f"Enganchado. Guardando en: {destino.resolve()}")
         if args.once:
-            for pagina, url in paginas_mav(navegador, args.filtro):
-                if captura.guardar(url, pagina.content()):
+            for marco, url in marcos_mav(navegador, args.filtro):
+                try:
+                    html = marco.content()
+                except Exception:
+                    continue
+                if captura.guardar(url, html):
                     print(f"  guardado  {url}")
             print(f"Listo. {captura.n} snapshot(s).")
             return 0
 
-        abiertas = paginas_mav(navegador, args.filtro)
+        abiertas = marcos_mav(navegador, args.filtro)
         if not abiertas:
             print("Ojo: no hay ninguna pestaña de la plataforma abierta todavia.")
             print("Abrila y logueate; esto la va a tomar sola cuando aparezca.")
@@ -171,11 +185,11 @@ def main() -> int:
         try:
             while not captura.lleno:
                 hubo_cambio = False
-                for pagina, url in paginas_mav(navegador, args.filtro):
+                for marco, url in marcos_mav(navegador, args.filtro):
                     try:
-                        html = pagina.content()
+                        html = marco.content()
                     except Exception:
-                        continue  # la pagina estaba navegando o se auto-refresco
+                        continue  # el frame estaba navegando o se auto-refresco
                     if captura.guardar(url, html):
                         hubo_cambio = True
                         print(f"  [{captura.n:05d}] {datetime.now():%H:%M:%S}  {nombre_corto(url)}")
