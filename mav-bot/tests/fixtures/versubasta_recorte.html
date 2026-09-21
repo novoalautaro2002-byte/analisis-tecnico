@@ -1,0 +1,22 @@
+<!-- Recorte del HTML real de cpd-versubasta.r, con el agente y el numero de
+     subasta cambiados. Se conserva el formato exacto: el espacio adelante del
+     id, la coma decimal, el "[X]" adentro de la celda de baja y la indentacion
+     original. Es la defensa contra que el parser se rompa si alguien "prolija"
+     el fixture sintetico y deja de parecerse a lo que manda el servidor. -->
+<html><head>
+        <!-- grid data -->
+        <script>       
+                var myData = [
+[ " 2046207","111", "10,00", "10:51:52", "<a href='#' onClick='bajaOferta(2046207)'>[X]</a>"]
+                ];
+                var myColumns = [
+                        "Oferta", "Ag.", "Desc.", "Ingreso", "Baja"
+                ];
+</script></head>
+<body>
+<form method="post">
+<input type="hidden" name="action">
+<input type="hidden" name="id">
+<input type="hidden" name="ident" value="1000001">
+</form>
+</body></html>
