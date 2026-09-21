@@ -108,6 +108,7 @@ class Sesion:
     jar: http.cookiejar.CookieJar = field(default_factory=http.cookiejar.CookieJar)
     _abridor: urllib.request.OpenerDirector | None = field(default=None, repr=False)
     _paso: object | None = field(default=None, repr=False)
+    _base: str = field(default="", repr=False)
 
     def __post_init__(self):
         if self._abridor is None:
@@ -124,6 +125,8 @@ class Sesion:
         servidor.
         """
         html = self._pedir(urllib.request.Request(BASE + LOGIN), en_login=True)
+        # El login limpio, para despues poder mostrar solo lo que cambio.
+        self._base = texto_visible(html)
         form = parsear_form(html, con_campo="password")
         campos = dict(form.campos)
         campos["id"] = usuario
@@ -184,10 +187,25 @@ class Sesion:
             except Exception:
                 pass
 
-        base = error or "La plataforma no aceptó el ingreso."
+        partes = [error or "La plataforma no aceptó el ingreso."]
+        dice = self.novedad(html)
+        if dice:
+            partes.append(f"MAV dice: «{dice}»")
         if guardado:
-            return f"{base} Guardé la respuesta en logs/{guardado}."
-        return base
+            partes.append(f"(respuesta guardada en logs/{guardado})")
+        return " ".join(partes)
+
+    def novedad(self, html: str) -> str:
+        """Lo que dice esta pantalla y no decia el login limpio.
+
+        Mostrar el texto entero no sirve: es casi todo el mismo formulario. Lo
+        util es la diferencia, que es justamente el mensaje de la plataforma.
+        """
+        if not self._base:
+            return ""
+        conocidas = set(self._base.split())
+        nuevas = [p for p in texto_visible(html).split() if p not in conocidas]
+        return " ".join(nuevas)[:300].strip()
 
     def adentro(self) -> bool:
         """Confirma contra una pantalla real, no contra la respuesta del login."""

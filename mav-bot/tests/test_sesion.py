@@ -184,5 +184,26 @@ class TestTextoVisible(unittest.TestCase):
             "<body><p>Usuario o contraseña incorrectos.</p></body>")))
 
 
+
+class TestNovedad(unittest.TestCase):
+    """Mostrar el texto entero no sirve: es casi todo el mismo formulario."""
+
+    def _sesion(self):
+        from motor.sesion import texto_visible
+        s = Sesion()
+        s._base = texto_visible(LOGIN)
+        return s
+
+    def test_sin_cambios_no_dice_nada(self):
+        self.assertEqual(self._sesion().novedad(LOGIN), "")
+
+    def test_muestra_el_mensaje_de_la_plataforma(self):
+        html = LOGIN.replace("<body>", "<body><p>Codigo vencido, pedi otro.</p>")
+        self.assertIn("vencido", self._sesion().novedad(html))
+
+    def test_sin_login_previo_no_inventa(self):
+        self.assertEqual(Sesion().novedad(LOGIN), "")
+
+
 if __name__ == "__main__":
     unittest.main()
