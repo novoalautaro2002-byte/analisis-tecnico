@@ -422,14 +422,27 @@ class TestRadar(unittest.TestCase):
     def _radar(self, v, s, ahora_s):
         v.recibir_ficha(s._fila(v.cfg.ident), ahora_s)
 
-    def test_no_relee_si_la_punta_no_se_movio(self):
+    def test_el_atajo_no_se_usa_antes_de_validarlo(self):
+        # Primero hay que ver una vez que el tablero coincide con el libro.
+        # Usarlo antes es creerle a algo que nunca se contrastó.
         s, v = self.vigilante()
         self._radar(v, s, 1000.0)
         v.tick(1000.0)
-        self.assertEqual(s.lecturas, 1)
+        self.assertFalse(v.radar_probado, "todavía no hay con qué comparar")
         self._radar(v, s, 1002.0)
         v.tick(1002.0)
-        self.assertEqual(s.lecturas, 1, "el tablero dice que nada cambio")
+        self.assertTrue(v.radar_probado)
+        self.assertEqual(s.lecturas, 2)
+
+    def test_no_relee_si_la_punta_no_se_movio(self):
+        s, v = self.vigilante()
+        for i in range(2):              # las dos que cuesta validarlo
+            self._radar(v, s, 1000.0 + i * 2)
+            v.tick(1000.0 + i * 2)
+        self.assertEqual(s.lecturas, 2)
+        self._radar(v, s, 1004.0)
+        v.tick(1004.0)
+        self.assertEqual(s.lecturas, 2, "el tablero dice que nada cambio")
 
     def test_relee_apenas_se_mueve_la_punta(self):
         s, v = self.vigilante()
@@ -456,11 +469,29 @@ class TestRadar(unittest.TestCase):
         s, v = self.vigilante()
         s.tasa_cpr = "11,11"            # no es la punta del libro
         self._radar(v, s, 1000.0)
-        v.tick(1000.0)
-        self.assertFalse(v.radar_confiable)
+        v.tick(1000.0)                  # primera lectura: no hay con qué comparar
         self._radar(v, s, 1002.0)
-        v.tick(1002.0)
-        self.assertEqual(s.lecturas, 2, "sin radar se relee siempre")
+        v.tick(1002.0)                  # el libro no se movió; ahora sí vale
+        self.assertFalse(v.radar_confiable)
+        self._radar(v, s, 1004.0)
+        v.tick(1004.0)
+        self.assertEqual(s.lecturas, 3, "sin radar se relee siempre")
+
+    def test_el_tablero_atrasado_no_cuenta_como_mentira(self):
+        """El tablero es una foto de hace un par de segundos.
+
+        En plena guerra difiere del libro todo el tiempo, y no porque mienta:
+        el libro se movió en el medio. Contrastarlo igual apagaba el atajo en
+        la primera recotización, justo donde tiene que servir.
+        """
+        s, v = self.vigilante()
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        # Alguien mejora. El bot lee el libro nuevo, pero el tablero que tiene
+        # en la mano todavía es el de antes.
+        s.paginas[IDENT] = pantalla([mia("26,98"), ajena("26,97", id=3)])
+        v.tick(1002.0)                  # sin refrescar la ficha a propósito
+        self.assertTrue(v.radar_confiable)
 
     def test_sin_punta_en_el_tablero_no_hay_atajo(self):
         s, v = self.vigilante()

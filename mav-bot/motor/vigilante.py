@@ -129,6 +129,7 @@ class Vigilante:
         # gastar un pedido por subasta. Nunca decide una oferta.
         self.ficha: Ficha | None = None
         self.radar_confiable = True
+        self.radar_probado = False    # hasta que no coincida una vez, no se usa
         self._huella_leida = None     # la huella que tenia el radar al leer
         self._leido_s = 0.0
         self._estable = False
@@ -253,7 +254,8 @@ class Vigilante:
 
     def _sin_novedad(self, ahora_s: float) -> bool:
         """¿El tablero garantiza que releer el libro no aporta nada?"""
-        if not (self.radar_confiable and self.ficha and self.libro):
+        if not (self.radar_confiable and self.radar_probado and self.ficha
+                and self.libro):
             return False
         if self.ficha.tasa_cpr is None:
             # Sin punta compradora en el tablero no hay nada que comparar. Se
@@ -346,8 +348,8 @@ class Vigilante:
         self.libro = libro
         if ahora_s is not None:
             self._leido_s = ahora_s
-        self._controlar_radar(libro)
         huella = tuple((o.id, o.tasa, o.ingreso) for o in libro.ofertas)
+        self._controlar_radar(libro, quieto=(huella == self.huella))
         if huella != self.huella:
             self.huella = huella
             mia = libro.mejor_propia()
@@ -357,18 +359,31 @@ class Vigilante:
                               f"ajena={formatear_tasa(ajena.tasa) if ajena else '-'}")
         return libro
 
-    def _controlar_radar(self, libro: Libro) -> None:
+    def _controlar_radar(self, libro: Libro, quieto: bool) -> None:
         """El libro es la verdad; el tablero, una promesa. Se contrastan.
 
         `tasa-cpr` del listado tendría que ser la mejor punta compradora, que
         es la mejor oferta del libro. Nunca lo vimos fallar, pero tampoco está
         documentado: si alguna vez no coincide, el atajo se apaga para el resto
         de la sesión y el bot vuelve a abrir la subasta en cada vuelta.
+
+        `quieto` dice que el libro no cambió desde la lectura anterior, y es la
+        única condición en la que el contraste significa algo. El tablero es
+        una foto de hasta un par de segundos atrás: en plena guerra difiere del
+        libro todo el tiempo, y no porque mienta sino porque el libro se movió
+        en el medio. Contrastarlo igual apagaba el atajo en la primera
+        recotización — justo donde tiene que servir.
         """
+        if not quieto:
+            return
         if not (self.radar_confiable and self.ficha and self.ficha.tasa_cpr):
             return
         mejor = min((o.tasa for o in libro.ofertas), default=None)
-        if mejor is None or mejor == self.ficha.tasa_cpr:
+        if mejor is None:
+            return
+        if mejor == self.ficha.tasa_cpr:
+            # Coincidieron con el libro quieto: recién ahora el atajo sirve.
+            self.radar_probado = True
             return
         self.radar_confiable = False
         self.log("radar",

@@ -91,9 +91,15 @@ vale la pena abrir el libro.
 
 **Lo que NO hace.** El radar no decide ofertas. La tasa que se carga sale
 siempre del libro de `cpd-versubasta.r`. Que `tasa-cpr` sea la punta compradora
-es una lectura de las columnas, no algo documentado, así que el vigilante
-contrasta las dos fuentes en cada lectura del libro y, si difieren una sola vez,
-apaga el atajo para el resto de la sesión y vuelve a leer siempre.
+es una lectura de las columnas, no algo documentado, así que el atajo hay que
+ganárselo: no se usa hasta que el tablero coincide con el libro al menos una
+vez, y si después difieren se apaga para el resto de la sesión.
+
+El contraste se hace **solo con el libro quieto** — cuando no cambió desde la
+lectura anterior. El tablero es una foto de hasta dos segundos atrás: en plena
+guerra difiere del libro casi siempre, y no porque mienta sino porque el libro
+se movió en el medio. Sin esa condición el atajo se apagaba solo en la primera
+recotización, que es justo donde sirve.
 
 ### `cpd-api-infosubasta.r?ident=<n>`
 
