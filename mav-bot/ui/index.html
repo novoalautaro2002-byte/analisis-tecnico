@@ -52,6 +52,12 @@
   .num{text-align:right}
   .aviso{border-left:3px solid var(--alerta);background:var(--panel);padding:10px 14px;
          border-radius:0 8px 8px 0;margin-bottom:13px;font-size:13px;word-break:break-word}
+  /* Lo que pide tu atención. Fuerte a propósito: es lo único que te obliga a
+     mirar, así que tiene que ganarle al resto de la pantalla. */
+  .avisos{border:1px solid var(--peligro);background:#2a1416;padding:12px 14px;
+          border-radius:9px;margin-bottom:13px;font-size:14px;font-weight:600}
+  .avisos div{padding:3px 0}
+  .avisos button{margin-top:8px}
   .log{font:12px/1.55 ui-monospace,Consolas,monospace;max-height:220px;overflow-y:auto}
   .log div{display:flex;gap:9px;padding:1px 0}
   .log .hora{color:var(--tenue);flex:0 0 auto}
@@ -97,9 +103,15 @@
     </span>
     <span class="chip" id="chip-mesa" hidden></span>
     <span style="flex:1"></span>
+    <label class="chip" for="sonido" style="cursor:pointer;margin:0"
+           title="Suena cuando una subasta se frena, cede o cierra. No suena por cotizar.">
+      <input type="checkbox" id="sonido" checked style="width:auto;margin:0 4px 0 0">
+      avisarme
+    </label>
     <button id="btn-parar" class="peligro" hidden>PARAR TODO</button>
   </div>
 
+  <div id="avisos" class="avisos" hidden></div>
   <div id="aviso" class="aviso" hidden></div>
 
   <div class="panel" id="panel-sesion">
@@ -244,6 +256,12 @@ $('btn-vivo').onclick = () => {
   if (confirm('MODO VIVO\n\nEl bot va a cargar ofertas reales en la subasta '
       + p.ident + '.\nPiso: ' + p.piso + '\n\n¿Seguro?')) {
     avisoLocal = null;
+    // Buen momento para pedir permiso de notificaciones: a partir de acá hay
+    // órdenes reales, y la idea es que no tengas que quedarte mirando.
+    try {
+      if (window.Notification && Notification.permission === 'default')
+        Notification.requestPermission();
+    } catch {}
     pedir('/api/sumar', p);
   }
 };
@@ -320,6 +338,78 @@ function pintarLog(lineas) {
   if (abajo) caja.scrollTop = caja.scrollHeight;
 }
 
+// --- avisos ----------------------------------------------------------------
+//
+// El bot existe para no tener que mirar la pantalla. Si para, cede o cierra y
+// hay que enterarse mirando, no sirve de nada: es el mismo problema que venía
+// a resolver. Así que avisa, y avisa SOLO cuando hace falta algo tuyo. Una
+// recotización no es noticia; que se haya frenado, sí.
+
+let fasesVistas = {};        // ident -> última fase que ya avisamos
+let sesionVista = null;
+
+const PORQUE = {
+  detenido: 'SE FRENÓ',
+  cedido:   'CEDIÓ en el piso',
+  cerrada:  'CERRÓ',
+};
+
+function beep(veces) {
+  if (!$('sonido').checked) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < veces; i++) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.frequency.value = 880;
+      const t = ctx.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+      o.start(t); o.stop(t + 0.2);
+    }
+  } catch {}
+}
+
+function avisar(texto, urgente) {
+  beep(urgente ? 3 : 1);
+  pendientes.unshift(texto);
+  pendientes = pendientes.slice(0, 6);
+  $('avisos').hidden = false;
+  $('avisos').innerHTML = pendientes.map(t => `<div>${esc(t)}</div>`).join('') +
+    '<button class="neutro chico" onclick="limpiarAvisos()">visto</button>';
+  try {
+    if (window.Notification && Notification.permission === 'granted')
+      new Notification('Mesa MAV', {body: texto});
+  } catch {}
+}
+
+let pendientes = [];
+
+function limpiarAvisos() {
+  pendientes = [];
+  $('avisos').hidden = true;
+  document.title = 'Mesa MAV';
+}
+
+function mirarNovedades(e) {
+  const subs = e.subastas || [];
+  for (const s of subs) {
+    const antes = fasesVistas[s.ident];
+    fasesVistas[s.ident] = s.fase;
+    if (antes === undefined || antes === s.fase) continue;
+    const porque = PORQUE[s.fase];
+    if (porque) avisar(`${s.ident}: ${porque} — ${s.detalle}`,
+                       s.fase === 'detenido');
+  }
+  if (sesionVista === true && e.sesion === false)
+    avisar('Se cayó la sesión de MAV. Hay que volver a ingresar.', true);
+  sesionVista = e.sesion;
+
+  document.title = pendientes.length
+    ? `(${pendientes.length}) Mesa MAV` : 'Mesa MAV';
+}
+
 async function refrescar() {
   let e;
   try { e = await (await fetch('/api/estado')).json(); }
@@ -350,6 +440,7 @@ async function refrescar() {
   aviso.hidden = !texto;
   if (texto) aviso.textContent = texto;
 
+  mirarNovedades(e);
   pintarMirado(e.mirado);
   pintarLog(e.log);
 }
