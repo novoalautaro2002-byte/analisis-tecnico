@@ -1,0 +1,68 @@
+RUTINA DE TODOS LOS DIAS
+========================
+
+MAV permite UNA SOLA SESION por usuario. El navegador y el bot no pueden
+estar logueados al mismo tiempo. Por eso el orden es este y no otro.
+
+
+1.  Abris MAV en el navegador, como siempre, con tu 2FA.
+
+2.  Cargas la oferta A MANO: comitente en cada cheque y la primera tasa.
+    Esto lo haces vos siempre. El bot no entra donde vos no entraste;
+    solo defiende lo que ya esta cargado.
+
+3.  CERRAS LA SESION CON EL BOTON SALIDA. No alcanza con cerrar la
+    pestaña. Si no, el bot no va a poder entrar y te va a decir:
+    "existe una sesion activa para el usuario en otra ubicacion".
+
+4.  Doble clic en "Mesa MAV" (el icono del Escritorio).
+
+5.  Ingresas ahi: mismo usuario, te llega el codigo, lo ponés.
+
+6.  Sumas cada subasta: numero y piso. El resto viene puesto.
+
+7.  Dejas la ventana negra abierta y miras.
+
+
+PARA CORTAR
+-----------
+  Boton PARAR TODO       frena las cotizaciones nuevas
+  Cerrar la ventana negra   mata el bot; es el corte mas rapido
+
+Ninguno de los dos puede des-enviar una orden que ya salio. Lo que quedo
+a mitad de camino se resuelve mirando el libro, no asumiendo.
+
+
+SI QUERES VOLVER A MIRAR MAV EN EL NAVEGADOR
+--------------------------------------------
+Primero paras el bot, despues entras. Nunca los dos juntos.
+
+
+MIENTRAS TE ESTAS ACOSTUMBRANDO
+-------------------------------
+Usa SUMAR EN SOMBRA (el boton azul), no el rojo. Hace todo igual pero en
+vez de cargar escribe en el log "HARIA: cotizar 26,98". Contra subastas
+reales. Cuando esas lineas digan durante varios dias lo que vos hubieras
+hecho, ahi pasas al VIVO.
+
+El primer VIVO: una subasta chica, un piso que si lo perdes no te cambia
+el dia, y vos sentado adelante.
+
+
+SI ALGO FALLA
+-------------
+  "No encuentro Python"
+        Instalalo de python.org marcando "Add Python to PATH".
+
+  "Existe una sesion activa"
+        No cerraste MAV con el boton Salida. Volve, entra, sali bien.
+
+  El bot dice "detenido"
+        Mira el log: siempre dice por que. Se frena a proposito cuando no
+        entiende el estado del mundo, que es mejor que adivinar.
+
+  Queres probar sin riesgo
+        Doble clic en PRACTICAR.bat. Es un MAV de mentira, no toca nada.
+
+  Queres la ultima version
+        Doble clic en ACTUALIZAR.bat. No toca la carpeta logs.
