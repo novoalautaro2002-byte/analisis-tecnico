@@ -1,10 +1,13 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Bot MAV
+title Practica MAV (simulacro)
 echo ============================================
-echo   Mesa MAV
+echo   Practica: MAV de mentira
 echo ============================================
+echo.
+echo Esto NO toca la plataforma real. Es para probar
+echo el bot contra una subasta inventada.
 echo.
 set PY=
 py -3 --version >nul 2>&1 && set PY=py -3
@@ -17,11 +20,6 @@ if not defined PY (
   pause
   exit /b 1
 )
-
-echo Abriendo la pantalla del bot...
-echo Deja esta ventana abierta. Ctrl+C para cortar.
+%PY% simulacro.py
 echo.
-%PY% ui.py
-echo.
-echo El bot se cerro.
 pause

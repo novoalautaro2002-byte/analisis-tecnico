@@ -8,16 +8,43 @@ MAV: vigila el libro y recotiza cuando alguien te supera, hasta tu piso.
 Solo biblioteca estándar. Abre una pantalla local en 127.0.0.1 donde se ingresa
 (con el 2FA de siempre), se suman subastas y se las mira avanzar.
 
-## Bajar la última versión
+## Uso diario
 
-En PowerShell, una sola línea. Actualiza los archivos del bot y **no toca**
-`logs\` ni nada que hayas agregado:
+Cuatro archivos para doble clic. No se instala ninguno: se abren y listo.
+
+| Archivo | Para qué |
+|---|---|
+| **`MAV.bat`** | Abre el bot contra la plataforma real. Es el de todos los días. |
+| **`PRACTICAR.bat`** | Abre el simulacro. No toca MAV. |
+| **`ACTUALIZAR.bat`** | Baja la última versión encima. No toca `logs\`. |
+| **`ACCESO-DIRECTO.bat`** | Una sola vez: deja *Mesa MAV* en el Escritorio. |
+
+La rutina es: doble clic en **Mesa MAV**, se abre el navegador, ingresás con tu
+2FA, sumás las subastas. Al terminar, `Ctrl+C` en la ventana negra o cerrala.
+
+**Esa ventana negra tiene que quedar abierta mientras el bot opera.** Si la
+cerrás, el bot muere — que es, de paso, tu kill switch más rápido.
+
+### A mano
+
+Si preferís la consola:
+
+```powershell
+cd $env:USERPROFILE\Downloads\Cmav
+python ui.py
+```
+
+### Actualizar desde PowerShell
+
+Lo mismo que hace `ACTUALIZAR.bat`, por si hace falta a mano:
 
 ```powershell
 $u='https://github.com/novoalautaro2002-byte/analisis-tecnico/archive/refs/heads/claude/mav-cheques-bot-p6jluz.zip'; $d="$env:USERPROFILE\Downloads\Cmav"; iwr $u -OutFile "$env:TEMP\mav.zip"; Remove-Item "$env:TEMP\mavx" -Recurse -Force -EA 0; Expand-Archive "$env:TEMP\mav.zip" "$env:TEMP\mavx" -Force; New-Item $d -ItemType Directory -Force | Out-Null; Copy-Item "$env:TEMP\mavx\*\mav-bot\*" $d -Recurse -Force; "listo: $d"
 ```
 
 ## Probarlo sin arriesgar plata
+
+Doble clic en **`PRACTICAR.bat`**, o:
 
     python simulacro.py
 
