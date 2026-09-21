@@ -12,7 +12,8 @@ from decimal import Decimal
 from motor.config import ConfigSubasta
 from motor.mesa import Mesa
 from motor.sesion import ErrorDePlataforma, SesionCaida
-from motor.vigilante import FALLAS_TOLERADAS, Fase, Vigilante
+from motor.vigilante import (FALLAS_TOLERADAS, VENTANA_CONFIRMACION_S, Fase,
+                             Vigilante)
 from tests.test_formulario import html_cheques, html_subasta
 from tests.test_libro import armar_html
 
@@ -40,16 +41,21 @@ class Log:
 
 
 class SesionFalsa:
-    def __init__(self, paginas=None, estado="Activa", tasa_cpr=None):
+    def __init__(self, paginas=None, estado="Activa", tasa_cpr=None,
+                 demora_en_verse=0, acepta=True):
         self.paginas = paginas if paginas is not None else {}
         self.estado = estado
         self.tasa_cpr = tasa_cpr        # lo que el tablero dice de la punta
+        self.demora_en_verse = demora_en_verse
+        self.acepta = acepta
+        self.pendiente = None
         self.posts = []
         self.lecturas = 0
         self.tableros = 0
 
     def subasta(self, ident):
         self.lecturas += 1
+        self._quizas_mostrar()
         return self.paginas.get(ident, pantalla([mia("27,00"), ajena("26,99")],
                                                 ident))
 
@@ -74,8 +80,32 @@ class SesionFalsa:
         return {i: self._fila(i) for i in idents}
 
     def postear(self, programa, pares, referer_ident=None):
-        self.posts.append(dict(pares))
+        """Acepta la oferta y la refleja en el libro, como haria MAV.
+
+        Con `demora_en_verse` se simula lo que rompia al bot: la plataforma
+        toma la oferta pero todavia contesta el libro viejo unas lecturas mas.
+        Que la sesion falsa no hiciera esto es la razon por la que los tests no
+        vieron el corte.
+        """
+        campos = dict(pares)
+        self.posts.append(campos)
+        self.pendiente = (int(campos["ident"]), campos["tasa"],
+                          self.demora_en_verse)
+        self._quizas_mostrar()
         return ""
+
+    def _quizas_mostrar(self):
+        if self.pendiente is None:
+            return
+        ident, tasa, faltan = self.pendiente
+        if faltan > 0:
+            self.pendiente = (ident, tasa, faltan - 1)
+            return
+        self.pendiente = None
+        if self.acepta:
+            self.paginas[ident] = pantalla(
+                [mia(tasa), ajena("26,99")], ident)
+            self.tasa_cpr = tasa
 
 
 class SesionCaediza(SesionFalsa):
@@ -281,6 +311,92 @@ class TestMesa(unittest.TestCase):
         m.tick(1000.0)
         self.assertEqual(s.lecturas, 1)
         self.assertFalse(m.activos[0].terminado)
+
+
+class TestConfirmacion(unittest.TestCase):
+    """El bot 'se cortaba solo apenas cargaba una tasa'.
+
+    Causa: releia el libro pegado al POST, MAV todavia contestaba el libro
+    viejo, y el control posterior lo leia como 'no entro lo que queria'.
+    """
+
+    def andando(self, **kw):
+        s = SesionFalsa(**kw)
+        v = Vigilante(config(), s, vivo=True, log=Log())
+        return s, v
+
+    def test_una_demora_de_la_plataforma_ya_no_lo_frena(self):
+        s, v = self.andando(demora_en_verse=3)
+        v.tick(1000.0)
+        self.assertEqual(len(s.posts), 1)
+        self.assertIs(v.fase, Fase.CONFIRMANDO)
+        for i in range(1, 8):
+            v.tick(1000.0 + i * 0.5)
+        self.assertIs(v.fase, Fase.MIRANDO)
+        self.assertEqual(len(s.posts), 1, "confirmar no puede repetir la orden")
+
+    def test_no_decide_nada_nuevo_mientras_confirma(self):
+        s, v = self.andando(demora_en_verse=2)
+        v.tick(1000.0)
+        v.tick(1000.5)
+        self.assertEqual(len(s.posts), 1)
+        self.assertIs(v.fase, Fase.CONFIRMANDO)
+
+    def test_si_nunca_aparece_frena(self):
+        # Fail closed: no saber que entro es lo unico que no se arregla
+        # mirando de nuevo.
+        s, v = self.andando(acepta=False)
+        v.tick(1000.0)
+        for i in range(1, 20):
+            v.tick(1000.0 + i * 0.5)
+        self.assertIs(v.fase, Fase.DETENIDO)
+        self.assertEqual(len(s.posts), 1)
+
+    def test_aguanta_toda_la_ventana_antes_de_frenar(self):
+        s, v = self.andando(acepta=False)
+        v.tick(1000.0)
+        v.tick(1000.0 + VENTANA_CONFIRMACION_S - 1)
+        self.assertIs(v.fase, Fase.CONFIRMANDO)
+        v.tick(1000.0 + VENTANA_CONFIRMACION_S + 1)
+        self.assertIs(v.fase, Fase.DETENIDO)
+
+    def test_un_post_que_fallo_tambien_se_resuelve_mirando(self):
+        # Si el POST tira error no sabemos si entro. No se reintenta la orden:
+        # se mira el libro, que es quien tiene la respuesta.
+        class PostCaido(SesionFalsa):
+            def postear(self, programa, pares, referer_ident=None):
+                super().postear(programa, pares, referer_ident)
+                raise ErrorDePlataforma("502")
+
+        s = PostCaido(demora_en_verse=2)
+        v = Vigilante(config(), s, vivo=True, log=Log())
+        v.tick(1000.0)
+        self.assertIs(v.fase, Fase.CONFIRMANDO)
+        for i in range(1, 8):
+            v.tick(1000.0 + i * 0.5)
+        self.assertIs(v.fase, Fase.MIRANDO, "entro igual; el libro lo dice")
+        self.assertEqual(len(s.posts), 1)
+
+    def test_sigue_peleando_despues_de_confirmar(self):
+        # Lo otro que se pedia: que no se pare sola tras una sola jugada.
+        s = SesionFalsa()
+        v = Vigilante(config(), s, vivo=True, log=Log())
+        ahora = 1000.0
+        for _ in range(60):
+            v.tick(ahora)
+            if v.fase is Fase.MIRANDO and len(s.posts) >= 2:
+                break
+            # Un rival que se mete abajo de cada oferta del bot.
+            if v.fase is Fase.MIRANDO:
+                ultima = Decimal(s.posts[-1]["tasa"].replace(",", "."))
+                s.paginas[IDENT] = pantalla([
+                    mia(s.posts[-1]["tasa"]),
+                    ajena(f"{ultima - Decimal('0.01'):f}".replace(".", ","), id=9),
+                ])
+            ahora += 0.5
+        self.assertGreaterEqual(len(s.posts), 2)
+        self.assertEqual(s.posts[-1]["tasa"], "26,96")
+        self.assertFalse(v.terminado)
 
 
 class TestRadar(unittest.TestCase):

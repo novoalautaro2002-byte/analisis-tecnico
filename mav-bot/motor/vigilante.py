@@ -52,10 +52,22 @@ RELECTURA_S = 15.0
 # alrededor de un minuto de insistencia antes de frenar.
 FALLAS_TOLERADAS = 6
 
+# Cuanto se le da a la plataforma para mostrar una oferta recien cargada, y cada
+# cuanto se vuelve a mirar mientras tanto.
+#
+# Esto existe porque el bot "se cortaba solo apenas cargaba una tasa": el POST
+# entraba bien, pero la relectura salia tan pegada que MAV todavia contestaba con
+# el libro viejo, y el control posterior lo leia como "no entro lo que queria" y
+# frenaba. Releer no es reintentar una orden: insistir con la *lectura* es
+# gratis y seguro. Lo que no se hace nunca es asumir que entro.
+VENTANA_CONFIRMACION_S = 6.0
+REINTENTO_CONFIRMACION_S = 0.5
+
 
 class Fase(Enum):
     MIRANDO = "mirando"          # leyendo el libro, sin nada que hacer
     ESPERANDO = "esperando"      # decidió cotizar, cumpliendo la demora
+    CONFIRMANDO = "confirmando"  # cotizó, esperando verla en el libro
     CEDIDO = "cedido"            # tocó el piso
     CERRADA = "cerrada"          # la subasta ya no está activa
     DETENIDO = "detenido"        # algo no cierra; no seguimos
@@ -121,6 +133,9 @@ class Vigilante:
         self._leido_s = 0.0
         self._estable = False
 
+        # Confirmacion pendiente de la ultima oferta: (tasa, hasta cuando).
+        self.confirmar: tuple[Decimal, float] | None = None
+
     # -- control -----------------------------------------------------------
 
     def parar(self, motivo: str = "parado a mano") -> None:
@@ -181,6 +196,12 @@ class Vigilante:
             self._mirar_estado(ahora_s)
             if self.terminado:
                 return
+
+        # Una oferta recién mandada se confirma antes que cualquier otra cosa:
+        # hasta no verla en el libro no se decide nada nuevo.
+        if self.confirmar is not None:
+            self._confirmar(ahora_s)
+            return
 
         # Si hay una cotización agendada y todavía no es hora, no gastamos un
         # request: el libro se relee recién cuando toca actuar.
@@ -280,15 +301,39 @@ class Vigilante:
             self.log("cotizacion_dudosa", f"[{self.cfg.ident}] no sé si entró: {e}")
         self.estado.registrar(self.cfg.ident, ahora_s)
 
+        # La oferta no se da por buena hasta verla en el libro, pero tampoco se
+        # frena por no verla en el primer intento: se abre una ventana.
+        self.confirmar = (decision.tasa, ahora_s + VENTANA_CONFIRMACION_S)
+        self._fase(Fase.CONFIRMANDO, f"mandé {texto}, esperando verla en el libro")
+        self.proxima_s = ahora_s + REINTENTO_CONFIRMACION_S
+
+    def _confirmar(self, ahora_s: float) -> None:
+        """Releer hasta ver la oferta propia, o hasta que se acabe la paciencia.
+
+        Insistir acá es insistir con una *lectura*, no con una orden: no puede
+        duplicar nada. Si al final de la ventana la oferta no aparece, ahí sí se
+        frena, porque no saber qué entró es la única situación que no se arregla
+        mirando de nuevo.
+        """
+        tasa, hasta_s = self.confirmar
         libro = self._leer(ahora_s)
-        v = verificar_despues(libro, self.cfg, decision.tasa)
-        self.log("verificacion",
-                 f"[{self.cfg.ident}] {'ok' if v else 'PARO'}: {v.motivo}", ok=v.ok)
-        if not v:
-            self._fase(Fase.DETENIDO, v.motivo)
+        v = verificar_despues(libro, self.cfg, tasa)
+        if v:
+            self.confirmar = None
+            self.log("verificacion", f"[{self.cfg.ident}] ok: {v.motivo}", ok=True)
+            self._fase(Fase.MIRANDO, f"cotizada en {formatear_tasa(tasa)}")
+            self.proxima_s = ahora_s + self.cfg.sondeo_s
             return
-        self._fase(Fase.MIRANDO, f"cotizada en {texto}")
-        self.proxima_s = ahora_s + self.cfg.sondeo_s
+
+        if ahora_s < hasta_s:
+            self.proxima_s = ahora_s + REINTENTO_CONFIRMACION_S
+            return
+
+        self.confirmar = None
+        self.log("verificacion",
+                 f"[{self.cfg.ident}] PARO tras {VENTANA_CONFIRMACION_S:.0f}s: "
+                 f"{v.motivo}", ok=False)
+        self._fase(Fase.DETENIDO, v.motivo)
 
     # -- lecturas ----------------------------------------------------------
 

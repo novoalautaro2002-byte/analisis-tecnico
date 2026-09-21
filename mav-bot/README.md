@@ -8,6 +8,33 @@ MAV: vigila el libro y recotiza cuando alguien te supera, hasta tu piso.
 Solo biblioteca estándar. Abre una pantalla local en 127.0.0.1 donde se ingresa
 (con el 2FA de siempre), se suman subastas y se las mira avanzar.
 
+## Bajar la última versión
+
+En PowerShell, una sola línea. Actualiza los archivos del bot y **no toca**
+`logs\` ni nada que hayas agregado:
+
+```powershell
+$u='https://github.com/novoalautaro2002-byte/analisis-tecnico/archive/refs/heads/claude/mav-cheques-bot-p6jluz.zip'; $d="$env:USERPROFILE\Downloads\Cmav"; iwr $u -OutFile "$env:TEMP\mav.zip"; Remove-Item "$env:TEMP\mavx" -Recurse -Force -EA 0; Expand-Archive "$env:TEMP\mav.zip" "$env:TEMP\mavx" -Force; New-Item $d -ItemType Directory -Force | Out-Null; Copy-Item "$env:TEMP\mavx\*\mav-bot\*" $d -Recurse -Force; "listo: $d"
+```
+
+## Probarlo sin arriesgar plata
+
+    python simulacro.py
+
+Levanta un MAV de mentira en `127.0.0.1` — las mismas URLs, el mismo HTML con
+`var myData`, el mismo JSON del listado, el mismo POST — con una subasta, una
+oferta tuya y un rival que te baja un centavo cada cuatro segundos hasta su
+piso. La interfaz es la misma de siempre, apuntada ahí en vez de a la
+plataforma real.
+
+El simulacro es hostil a propósito: tarda en mostrar una oferta recién cargada
+(el defecto que hacía que el bot se cortara solo), rechaza el POST si le falta
+el comitente con el mismo texto que usa MAV, y cierra con cuenta regresiva que
+se reinicia en cada mejora.
+
+Poné el piso en `26,50` y el bot gana la subasta. Ponelo en `26,96` y lo vas a
+ver **ceder** en vez de perforarlo. Esas dos corridas son la demostración.
+
 ## Cómo está armado
 
 | Módulo | Qué hace |
@@ -18,8 +45,10 @@ Solo biblioteca estándar. Abre una pantalla local en 127.0.0.1 donde se ingresa
 | `motor/riesgo.py` | El gate: piso, monotonía, topes, banda de tasas, kill switch. |
 | `motor/formulario.py` | Arma el POST **copiando** los campos del servidor. |
 | `motor/vigilante.py` | Una subasta, como máquina de estados que no bloquea. |
+| `motor/ficha.py` | La fila del listado: estado, punta compradora, T.Min, cierre. |
 | `motor/mesa.py` | Varias subastas a la vez sobre una sola sesión. |
 | `ui.py` + `ui/` | La pantalla. |
+| `simulacro.py` | Un MAV de mentira para probar el bot entero sin plata. |
 
 Dos reglas sostienen todo lo demás:
 
