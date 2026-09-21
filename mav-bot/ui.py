@@ -37,6 +37,10 @@ from motor.sesion import ErrorDePlataforma, IngresoRechazado, Sesion, SesionCaid
 AQUI = Path(__file__).parent
 PUERTO = 8733
 
+# En MAV se opera por agente y el del trader no cambia nunca, asi que viene
+# puesto. Se puede editar en pantalla si hace falta.
+AGENTE_POR_DEFECTO = "442"
+
 
 class Trabajador(threading.Thread):
     """El hilo que habla con la plataforma."""
@@ -52,10 +56,10 @@ class Trabajador(threading.Thread):
         self.log: Registro | None = None
         self.salir = False
         self.eco = True          # los tests lo apagan
-        self.agente = ""          # numero de agente: constante del trader
+        self.agente = AGENTE_POR_DEFECTO   # constante del trader
         self.estado = {
             "sesion": False,
-            "agente": "",
+            "agente": AGENTE_POR_DEFECTO,
             "pendiente": [],
             "subastas": [],
             "mirado": None,

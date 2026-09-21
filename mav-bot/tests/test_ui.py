@@ -49,9 +49,15 @@ class Base(unittest.TestCase):
 class TestAgente(Base):
     """En MAV se opera por agente: sin ese numero no se sabe que oferta es tuya."""
 
-    def test_sin_agente_no_se_puede_sumar(self):
+    def test_viene_puesto_el_del_trader(self):
+        # Es constante y no cambia nunca: tenerlo que escribir cada vez es
+        # friccion sin beneficio.
+        self.assertEqual(ui.Trabajador().agente, ui.AGENTE_POR_DEFECTO)
+
+    def test_si_se_vacia_no_se_puede_sumar(self):
         self.t.sesion = SesionFalsa()
         self.t._tras_ingreso(None)
+        self.t._agente("")
         with self.assertRaises(ErrorDePlataforma):
             self.t._sumar(dict(BUENA))
         self.assertEqual(self.t.mesa.activos, [])

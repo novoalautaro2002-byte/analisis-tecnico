@@ -92,7 +92,7 @@
     <span style="display:flex;align-items:center;gap:6px">
       <label for="agente" style="margin:0;font-size:11px">Agente</label>
       <input id="agente" style="width:72px;padding:4px 8px" inputmode="numeric"
-             placeholder="442">
+             value="442">
     </span>
     <span class="chip" id="chip-mesa" hidden></span>
     <span style="flex:1"></span>
@@ -213,16 +213,38 @@ $('btn-diag').onclick = () => {
   const ident = $('ident').value.trim();
   if (ident) pedir('/api/diagnostico', {ident});
 };
+let avisoLocal = null;
+
+function falta(p) {
+  // Se devuelve que falta, y se marca el campo: un alert que se pierde deja al
+  // trader apretando un boton que no hace nada.
+  for (const [id, nombre] of [['ident','el número de subasta'], ['piso','el piso']]) {
+    $(id).style.outline = '';
+    if (!p[id === 'ident' ? 'ident' : 'piso']) {
+      $(id).style.outline = '2px solid var(--peligro)';
+      $(id).focus();
+      return 'Falta ' + nombre + ' para sumar la subasta.';
+    }
+  }
+  return null;
+}
+
 $('btn-sombra').onclick = () => {
   const p = params(false);
-  if (!p.ident || !p.piso) return alert('Falta la subasta o el piso.');
+  const f = falta(p);
+  if (f) { avisoLocal = f; return refrescar(); }
+  avisoLocal = null;
   pedir('/api/sumar', p);
 };
 $('btn-vivo').onclick = () => {
   const p = params(true);
-  if (!p.ident || !p.piso) return alert('Falta la subasta o el piso.');
+  const f = falta(p);
+  if (f) { avisoLocal = f; return refrescar(); }
   if (confirm('MODO VIVO\n\nEl bot va a cargar ofertas reales en la subasta '
-      + p.ident + '.\nPiso: ' + p.piso + '\n\n¿Seguro?')) pedir('/api/sumar', p);
+      + p.ident + '.\nPiso: ' + p.piso + '\n\n¿Seguro?')) {
+    avisoLocal = null;
+    pedir('/api/sumar', p);
+  }
 };
 $('btn-parar').onclick = () => pedir('/api/parar');
 
@@ -250,8 +272,8 @@ function pintarMirado(m) {
       ${m.segmento?`<div><div class="k">Segmento</div>
         <div class="v" style="font-size:15px">${esc(m.segmento)}</div></div>`:''}
     </div>${tablaOfertas(m.ofertas)}
-    ${activa?'':`<p class="nota">Cerrada: MAV le saca el link de baja a las ofertas,
-      así que acá no se distingue cuál era tuya. El bot no opera en subastas cerradas.</p>`}`;
+    ${activa?'':`<p class="nota">La subasta está ${esc(m.estado.toLowerCase())}.
+      El bot solo opera en subastas activas.</p>`}`;
 }
 
 function tarjeta(s) {
@@ -312,8 +334,9 @@ async function refrescar() {
   $('grilla').innerHTML = subs.map(tarjeta).join('');
 
   const aviso = $('aviso');
-  aviso.hidden = !e.aviso;
-  if (e.aviso) aviso.textContent = e.aviso;
+  const texto = avisoLocal || e.aviso;
+  aviso.hidden = !texto;
+  if (texto) aviso.textContent = texto;
 
   pintarMirado(e.mirado);
   pintarLog(e.log);
