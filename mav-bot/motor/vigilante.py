@@ -230,7 +230,7 @@ class Vigilante:
 
     def _leer(self) -> Libro:
         self._html = self.sesion.subasta(self.cfg.ident)
-        libro = parsear_libro(self._html)
+        libro = parsear_libro(self._html, self.cfg.mi_agente)
         if libro.ident != self.cfg.ident:
             raise LibroIlegible(
                 f"pedí la subasta {self.cfg.ident} y el libro dice {libro.ident}")

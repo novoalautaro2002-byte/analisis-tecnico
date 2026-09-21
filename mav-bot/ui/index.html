@@ -89,6 +89,11 @@
   <div class="barra">
     <h1>Mesa MAV</h1>
     <span class="chip" id="chip-sesion">Sesión: sin iniciar</span>
+    <span style="display:flex;align-items:center;gap:6px">
+      <label for="agente" style="margin:0;font-size:11px">Agente</label>
+      <input id="agente" style="width:72px;padding:4px 8px" inputmode="numeric"
+             placeholder="442">
+    </span>
     <span class="chip" id="chip-mesa" hidden></span>
     <span style="flex:1"></span>
     <button id="btn-parar" class="peligro" hidden>PARAR TODO</button>
@@ -113,6 +118,7 @@
     <p class="nota">
       MAV admite una sola sesión por usuario: cerrá la del navegador antes de
       entrar acá. La contraseña y el código no se guardan en ningún lado.
+      El <b>agente</b> de arriba es lo que define qué oferta del libro es tuya.
     </p>
   </div>
 
@@ -183,6 +189,9 @@ function params(vivo) {
     max_recotizaciones: $('max-reco').value.trim()||'60', vivo,
   };
 }
+
+$('agente').onchange = () => pedir('/api/agente', {agente: $('agente').value.trim()});
+$('agente').onblur = $('agente').onchange;
 
 $('btn-ingresar').onclick = () => {
   const usuario = $('usuario').value.trim(), clave = $('clave').value;
@@ -285,6 +294,9 @@ async function refrescar() {
   const ses = $('chip-sesion');
   ses.textContent = 'Sesión: ' + (e.sesion ? 'iniciada' : 'sin iniciar');
   ses.className = 'chip ' + (e.sesion ? 'ok' : 'mal');
+
+  if (document.activeElement !== $('agente') && e.agente && !$('agente').value)
+    $('agente').value = e.agente;
 
   campoPendiente = (e.pendiente && e.pendiente.length) ? e.pendiente[0] : null;
   $('paso-codigo').hidden = !campoPendiente;

@@ -39,14 +39,46 @@ class Base(unittest.TestCase):
         if self.t.log:
             self.t.log.cerrar()
 
-    def con_sesion(self):
+    def con_sesion(self, agente="442"):
+        self.t.agente = agente
         self.t.sesion = SesionFalsa()
         self.t._tras_ingreso(None)
         return self.t
 
 
+class TestAgente(Base):
+    """En MAV se opera por agente: sin ese numero no se sabe que oferta es tuya."""
+
+    def test_sin_agente_no_se_puede_sumar(self):
+        self.t.sesion = SesionFalsa()
+        self.t._tras_ingreso(None)
+        with self.assertRaises(ErrorDePlataforma):
+            self.t._sumar(dict(BUENA))
+        self.assertEqual(self.t.mesa.activos, [])
+
+    def test_el_agente_viaja_a_la_config(self):
+        t = self.con_sesion("442")
+        t._sumar(dict(BUENA))
+        self.assertEqual(t.mesa.vigilantes[1556714].cfg.mi_agente, "442")
+
+    def test_una_oferta_del_agente_propio_es_propia(self):
+        from motor.libro import parsear_libro
+        from tests.test_libro import armar_html
+        # Sin link de baja: lo que decide es el numero de agente.
+        html = armar_html(900, [
+            {"id": 1, "ag": "442", "tasa": "26,00", "hora": "10:00:00",
+             "propia": False},
+            {"id": 2, "ag": "406", "tasa": "25,50", "hora": "10:01:00",
+             "propia": False},
+        ])
+        libro = parsear_libro(html, "442")
+        self.assertEqual([o.id for o in libro.propias], [1])
+        self.assertEqual([o.id for o in libro.ajenas], [2])
+
+
 class TestSinSesion(Base):
     def test_no_se_puede_sumar_una_subasta(self):
+        self.t.agente = "442"
         with self.assertRaises(ErrorDePlataforma):
             self.t._sumar(dict(BUENA))
         self.assertIsNone(self.t.mesa)

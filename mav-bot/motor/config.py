@@ -31,6 +31,10 @@ class ConfigSubasta:
     ident: int
     """Numero de subasta. El bot no toca ninguna otra."""
 
+    mi_agente: str
+    """Tu numero de agente. En MAV se opera por agente, no por usuario: una
+    oferta del libro es tuya cuando este numero coincide."""
+
     piso: Decimal
     """Tasa minima que aceptamos.
 
@@ -86,6 +90,8 @@ class ConfigSubasta:
     def __post_init__(self) -> None:
         if self.ident <= 0:
             raise ConfigInvalida("el numero de subasta tiene que ser positivo")
+        if not self.mi_agente.strip():
+            raise ConfigInvalida("falta tu numero de agente")
         if not (self.tasa_min_absoluta <= self.piso <= self.tasa_max_absoluta):
             raise ConfigInvalida(
                 f"el piso {self.piso} cae fuera de la banda plausible "

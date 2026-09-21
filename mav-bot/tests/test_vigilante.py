@@ -68,7 +68,7 @@ class SesionCaediza(SesionFalsa):
 
 
 def config(**kw):
-    base = dict(ident=IDENT, piso=Decimal("25.00"))
+    base = dict(ident=IDENT, mi_agente="442", piso=Decimal("25.00"))
     base.update(kw)
     return ConfigSubasta(**base)
 

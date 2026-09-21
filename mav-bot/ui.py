@@ -52,8 +52,10 @@ class Trabajador(threading.Thread):
         self.log: Registro | None = None
         self.salir = False
         self.eco = True          # los tests lo apagan
+        self.agente = ""          # numero de agente: constante del trader
         self.estado = {
             "sesion": False,
+            "agente": "",
             "pendiente": [],
             "subastas": [],
             "mirado": None,
@@ -105,7 +107,9 @@ class Trabajador(threading.Thread):
                 self._set(aviso=f"error: {e}")
 
     def _despachar(self, orden: str, datos: dict) -> None:
-        if orden == "ingresar":
+        if orden == "agente":
+            self._agente(str(datos.get("agente", "")))
+        elif orden == "ingresar":
             self._ingresar(datos.get("usuario", ""), datos.get("clave", ""))
         elif orden == "codigo":
             self._codigo(datos.get("valores") or {})
@@ -120,6 +124,18 @@ class Trabajador(threading.Thread):
             self._set(aviso="Parado.")
         elif orden == "diagnostico":
             self._diagnostico(int(datos.get("ident") or 0))
+
+    def _agente(self, agente: str) -> None:
+        """En MAV se opera por agente, no por usuario: define qué oferta es tuya."""
+        self.agente = agente.strip()
+        self._set(agente=self.agente,
+                  aviso=f"Operando como agente {self.agente}."
+                        if self.agente else "Falta tu número de agente.")
+
+    def _exige_agente(self) -> str:
+        if not self.agente:
+            raise ErrorDePlataforma("Primero poné tu número de agente.")
+        return self.agente
 
     # -- sesión ------------------------------------------------------------
 
@@ -163,7 +179,7 @@ class Trabajador(threading.Thread):
     def _mirar(self, ident: int) -> None:
         """Una lectura suelta, para ver cómo está parada la puja."""
         sesion = self._exige_sesion()
-        libro = parsear_libro(sesion.subasta(ident))
+        libro = parsear_libro(sesion.subasta(ident), self._exige_agente())
         mia = libro.mejor_propia()
         ajena = libro.mejor_ajena()
         ficha = sesion.estado_subasta(ident) or {}
@@ -185,6 +201,7 @@ class Trabajador(threading.Thread):
         mesa = self._exige_mesa()
         cfg = ConfigSubasta(
             ident=int(datos["ident"]),
+            mi_agente=self._exige_agente(),
             piso=parsear_tasa(datos["piso"]),
             decremento_min=parsear_tasa(datos["decremento_min"]),
             decremento_max=parsear_tasa(datos["decremento_max"]),
@@ -227,22 +244,22 @@ class Trabajador(threading.Thread):
             ruta.write_text(html, encoding="latin-1", errors="replace")
             guardados.append(ruta.name)
             if nombre == "subasta":
-                filas.extend(self._resumen_libro(html))
+                filas.extend(self._resumen_libro(html, self.agente))
 
         self._set(mirado=None, aviso=" | ".join(filas) +
                   f"  →  guardado en logs/: {', '.join(guardados)}")
 
     @staticmethod
-    def _resumen_libro(html: str) -> list[str]:
+    def _resumen_libro(html: str, agente: str = "") -> list[str]:
         try:
-            libro = parsear_libro(html)
+            libro = parsear_libro(html, agente)
         except LibroIlegible as e:
             return [f"no entiendo el libro: {e}"]
         campos = parsear_campos(html)
         filas = [f"subasta {libro.ident}, {len(libro.ofertas)} oferta(s)"]
         for o in libro.ofertas:
             filas.append(f"#{o.id} ag {o.agente} {formatear_tasa(o.tasa)} "
-                         f"{'CON' if o.propia else 'SIN'} link de baja")
+                         f"{'PROPIA' if o.propia else 'ajena'}")
         filas.append(f"campos del form: {len(campos)}")
         return filas
 
@@ -285,6 +302,7 @@ class Handler(BaseHTTPRequestHandler):
         orden = {"/api/ingresar": "ingresar", "/api/codigo": "codigo",
                  "/api/mirar": "mirar", "/api/sumar": "sumar",
                  "/api/sacar": "sacar", "/api/parar": "parar",
+                 "/api/agente": "agente",
                  "/api/diagnostico": "diagnostico"}.get(self.path)
         if orden is None:
             return self._json({"error": "no existe"}, 404)

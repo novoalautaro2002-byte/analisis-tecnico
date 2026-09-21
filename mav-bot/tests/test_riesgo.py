@@ -14,7 +14,8 @@ from datetime import time as _t
 
 
 def config(**kw):
-    base = dict(ident=IDENT, piso=Decimal("25.00"), intervalo_min_s=10.0)
+    base = dict(ident=IDENT, mi_agente="442", piso=Decimal("25.00"),
+                intervalo_min_s=10.0)
     base.update(kw)
     return ConfigSubasta(**base)
 

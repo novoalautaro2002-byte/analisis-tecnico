@@ -25,7 +25,7 @@ def ajena(tasa, hora="10:00:00", id=2, ag="999"):
 
 
 def config(**kw):
-    base = dict(ident=IDENT, piso=Decimal("25.00"))
+    base = dict(ident=IDENT, mi_agente="442", piso=Decimal("25.00"))
     base.update(kw)
     return ConfigSubasta(**base)
 

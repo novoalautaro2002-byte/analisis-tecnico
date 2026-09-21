@@ -110,8 +110,16 @@ def parsear_hora(texto: str) -> time:
         raise LibroIlegible(f"hora ilegible: {texto!r}") from e
 
 
-def parsear_libro(html: str) -> Libro:
-    """Saca el libro del HTML de cpd-versubasta.r."""
+def parsear_libro(html: str, mi_agente: str | None = None) -> Libro:
+    """Saca el libro del HTML de cpd-versubasta.r.
+
+    `mi_agente` es el numero de agente propio, que es como se opera en MAV: no
+    por usuario. Una oferta es propia cuando el agente coincide, y punto.
+
+    Sin `mi_agente` se cae al link de baja, que sirve para una mirada suelta
+    pero no para decidir: la plataforma lo saca cuando la subasta cierra, y
+    tampoco aparece en todos los casos.
+    """
     m_ident = _IDENT.search(html)
     if not m_ident:
         raise LibroIlegible("no encontre el campo 'ident' con el numero de subasta")
@@ -148,15 +156,14 @@ def parsear_libro(html: str) -> Libro:
         crudo_id = fila[indice["Oferta"]].strip()
         if not crudo_id.isdigit():
             raise LibroIlegible(f"id de oferta ilegible: {crudo_id!r}")
+        agente = fila[indice["Ag."]].strip()
         ofertas.append(Oferta(
             id=int(crudo_id),
-            agente=fila[indice["Ag."]].strip(),
+            agente=agente,
             tasa=parsear_tasa(fila[indice["Desc."]]),
             ingreso=parsear_hora(fila[indice["Ingreso"]]),
-            # El link de baja solo aparece donde uno puede dar de baja, o sea en
-            # las ofertas propias. Es mejor senal que el numero de agente, que
-            # es del ALyC y lo comparten todos los operadores de la mesa.
-            propia="bajaOferta(" in fila[indice["Baja"]],
+            propia=(agente == mi_agente.strip() if mi_agente
+                    else "bajaOferta(" in fila[indice["Baja"]]),
         ))
 
     return Libro(ident=ident, ofertas=tuple(ofertas))
