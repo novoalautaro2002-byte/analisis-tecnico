@@ -166,10 +166,13 @@ var myColumns = [ "Oferta", "Ag.", "Desc.", "Ingreso", "Baja" ];
 | `Ingreso` | Hora `hh:mm:ss` |
 | `Baja` | Link `[X]` con `bajaOferta(<id>)` |
 
-**La columna `Baja` es el identificador de propiedad.** El link aparece solo en
-las ofertas que uno puede dar de baja, o sea las propias. Es más fuerte que
-comparar el número de agente, que es del ALyC y lo comparten todos los operadores
-de la mesa.
+**La propiedad se decide por el número de agente, no por el link de baja.**
+Primero deduje lo contrario — que el `[X]` de la columna `Baja` era la marca más
+confiable — y estaba mal. Lo corrigió el trader: *"yo soy el 442 siempre, no se
+opera por usuario, se opera por número de agente"*. Una oferta es propia cuando
+`Ag.` coincide con el agente del ALyC, y punto; que un compañero de mesa la haya
+cargado no la hace ajena. El link de baja se usa solo como respaldo para una
+mirada suelta, porque la plataforma lo saca cuando la subasta cierra.
 
 ### Alta, modificación y baja son un solo POST
 
