@@ -205,5 +205,47 @@ class TestNovedad(unittest.TestCase):
         self.assertEqual(Sesion().novedad(LOGIN), "")
 
 
+
+class TestMetaRefresh(unittest.TestCase):
+    """MAV redirige entre pasos del login con <meta refresh>, que el navegador
+    sigue y urllib no. Sin seguirlo, el ingreso se queda a mitad."""
+
+    def test_extrae_el_destino(self):
+        from motor.sesion import destino_refresh
+        html = ('<meta http-equiv="REFRESH" content="0; URL=login.r?'
+                'sesionactiva=desconocida&usuario=portfol26">')
+        self.assertEqual(
+            destino_refresh(html),
+            "login.r?sesionactiva=desconocida&usuario=portfol26")
+
+    def test_sin_refresh_devuelve_none(self):
+        from motor.sesion import destino_refresh
+        self.assertIsNone(destino_refresh("<html><body>hola</body></html>"))
+
+    def test_sigue_el_refresh_durante_el_login(self):
+        # Un doble que responde por URL: el POST devuelve un refresh, y al
+        # seguirlo aparece el paso del codigo.
+        redir = ('<meta http-equiv="refresh" content="0; URL=login.r?x=1">')
+
+        class PorUrl(Sesion):
+            def __init__(self):
+                super().__init__()
+                self.visitadas = []
+
+            def _pedir_una(self, pedido):
+                self.visitadas.append(pedido.full_url)
+                if pedido.data:              # el POST de credenciales
+                    return redir
+                if "login.r" in pedido.full_url:
+                    return CODIGO
+                return LOGIN
+
+        s = PorUrl()
+        pendiente = s.ingresar("portfol26", "clave")
+        self.assertEqual(pendiente.campos, ("codigo",))
+        self.assertTrue(any("login.r" in u for u in s.visitadas),
+                        "no siguio el meta-refresh")
+
+
 if __name__ == "__main__":
     unittest.main()

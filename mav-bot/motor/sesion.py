@@ -35,6 +35,18 @@ NAVEGADOR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 _PANTALLA_LOGIN = re.compile(r"validar2\.r|Inicio de Sesi", re.I)
 _COOKIE = re.compile(r"(mvrcookie|mvrusername)\s*=\s*([^;,\s]+)")
+
+# <meta http-equiv="refresh" content="0; URL=login.r?..."> — una redireccion
+# que hace el navegador, no el servidor, asi que urllib no la sigue sola. El
+# login de MAV la usa entre pasos; sin seguirla, el ingreso se queda a mitad.
+_META_REFRESH = re.compile(
+    r"""<meta[^>]*http-equiv=["']?refresh["']?[^>]*"""
+    r"""content=["'][^"']*url\s*=\s*([^"'>\s]+)""", re.I)
+
+
+def destino_refresh(html: str) -> str | None:
+    m = _META_REFRESH.search(html)
+    return m.group(1) if m else None
 _ERROR = re.compile(
     r"(usuario o contrase|incorrect\w*|inhibid\w*|expirad\w*|bloquead\w*|"
     r"sesi\w+ activa|ya se encuentra)", re.I)
@@ -282,6 +294,24 @@ class Sesion:
         return self._pedir(pedido, en_login=en_login)
 
     def _pedir(self, pedido: urllib.request.Request, en_login: bool = False) -> str:
+        html = self._pedir_una(pedido)
+
+        # Seguir los meta-refresh, como haria el navegador. Solo en el ingreso:
+        # fuera de ahi un refresh inesperado es una señal, no algo a seguir a
+        # ciegas. Con tope de saltos por si la plataforma cicla.
+        if en_login:
+            for _ in range(6):
+                destino = destino_refresh(html)
+                if not destino:
+                    break
+                url = urllib.parse.urljoin(pedido.full_url, destino)
+                html = self._pedir_una(urllib.request.Request(url, method="GET"))
+
+        if not en_login and es_pantalla_de_login(html):
+            raise SesionCaida("la plataforma devolvio el login: la sesion vencio")
+        return html
+
+    def _pedir_una(self, pedido: urllib.request.Request) -> str:
         pedido.add_header("User-Agent", NAVEGADOR)
         pedido.add_header("Accept-Language", "es-AR,es;q=0.9")
         try:
@@ -291,12 +321,7 @@ class Sesion:
             raise ErrorDePlataforma(f"HTTP {e.code} en {pedido.full_url}") from e
         except urllib.error.URLError as e:
             raise ErrorDePlataforma(f"no llegue a la plataforma: {e.reason}") from e
-
-        html = crudo.decode(CODIFICACION, errors="replace")
-        # Durante el ingreso la pantalla de login es la respuesta esperada.
-        if not en_login and es_pantalla_de_login(html):
-            raise SesionCaida("la plataforma devolvio el login: la sesion vencio")
-        return html
+        return crudo.decode(CODIFICACION, errors="replace")
 
 
 def _texto_de_error(m) -> str | None:
