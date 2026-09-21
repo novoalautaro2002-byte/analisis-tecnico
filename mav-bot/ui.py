@@ -14,10 +14,14 @@ estado; nunca maneja a Chrome por su cuenta.
 from __future__ import annotations
 
 import json
+import os
 import queue
+import subprocess
 import sys
 import threading
 import time as reloj
+import urllib.error
+import urllib.request
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +42,72 @@ AQUI = Path(__file__).parent
 CDP = "http://localhost:9222"
 BASE = ("https://trading.mav-sa.com.ar/cgi-bin/wspd_cgi.sh/"
         "WService=wsbroker1/cpd-versubasta.r?ident={ident}")
+LOGIN = ("https://trading.mav-sa.com.ar/cgi-bin/wspd_cgi.sh/"
+         "WService=wsbroker1/mvr-usuarios.r")
+PERFIL = AQUI / "perfil-chrome"
+
+# Perfil aparte a proposito: este Chrome convive con el de siempre. Sin
+# --user-data-dir propio, Chrome se cuelga del proceso que ya corre y el puerto
+# de debug nunca se abre.
+RUTAS_CHROME = (
+    r"{ProgramFiles}\Google\Chrome\Application\chrome.exe",
+    r"{ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+    r"{LocalAppData}\Google\Chrome\Application\chrome.exe",
+    r"{ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    r"{ProgramFiles}\Microsoft\Edge\Application\msedge.exe",
+)
+
+
+def chrome_escuchando() -> bool:
+    """Si ya hay un navegador con el puerto de debug abierto."""
+    try:
+        # Sin proxy: es localhost, y un proxy del sistema lo rompe.
+        abridor = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        abridor.open(CDP + "/json/version", timeout=1.5)
+        return True
+    except Exception:
+        return False
+
+
+def buscar_chrome() -> str | None:
+    for plantilla in RUTAS_CHROME:
+        try:
+            ruta = plantilla.format(**os.environ)
+        except KeyError:
+            continue
+        if Path(ruta).exists():
+            return ruta
+    return None
+
+
+def asegurar_chrome() -> str:
+    """Abre el navegador con el puerto de debug si no estaba abierto.
+
+    Es la plomeria que antes tenia que hacer el trader a mano en un cmd. Que la
+    haga el programa: un paso menos para equivocarse.
+    """
+    if chrome_escuchando():
+        return "ya estaba abierto"
+
+    exe = buscar_chrome()
+    if exe is None:
+        return ("no encontre Chrome ni Edge; abrilo a mano con "
+                "--remote-debugging-port=9222")
+    try:
+        subprocess.Popen([
+            exe,
+            f"--remote-debugging-port={CDP.rsplit(':', 1)[1]}",
+            f"--user-data-dir={PERFIL}",
+            LOGIN,
+        ])
+    except Exception as e:
+        return f"no pude abrirlo: {e}"
+
+    for _ in range(50):          # hasta 25s; el primer arranque tarda
+        if chrome_escuchando():
+            return "abierto, logueate ahi"
+        reloj.sleep(0.5)
+    return "lo abri pero no responde al puerto de debug"
 PUERTO = 8733
 
 
@@ -284,6 +354,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
+    print("Buscando Chrome...")
+    print(f"Chrome: {asegurar_chrome()}\n")
     TRABAJADOR.start()
     # Solo loopback: la interfaz maneja ordenes reales, no sale de la maquina.
     servidor = ThreadingHTTPServer(("127.0.0.1", PUERTO), Handler)
