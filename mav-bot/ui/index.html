@@ -87,12 +87,29 @@
 
   <div class="barra">
     <h1>Bot MAV</h1>
-    <span class="chip" id="chip-chrome">Chrome: …</span>
+    <span class="chip" id="chip-sesion">Sesión: sin conectar</span>
     <span class="chip" id="chip-modo" hidden></span>
     <span class="chip" id="chip-reco" hidden></span>
   </div>
 
   <div id="aviso" class="aviso" hidden></div>
+
+  <div class="panel">
+    <h2>Sesión</h2>
+    <div class="fila">
+      <div class="campo" style="flex:1 1 420px">
+        <label for="cookie">Cookie de tu sesión abierta</label>
+        <input id="cookie" placeholder="mvrcookie=...; mvrusername=...">
+      </div>
+      <button id="btn-sesion" class="neutro">Conectar</button>
+    </div>
+    <p class="nota">
+      En el Chrome donde ya estás logueado en MAV: <b>F12</b> → pestaña
+      <b>Console</b> → escribí <code style="font-family:ui-monospace,Consolas,monospace;background:var(--fondo);padding:1px 5px;border-radius:4px">document.cookie</code> → Enter → copiá lo
+      que salga y pegalo acá. Dura todo el día, igual que tu sesión.
+      No se guarda en ningún archivo y no sale de tu máquina.
+    </p>
+  </div>
 
   <div class="panel">
     <h2>Subasta</h2>
@@ -101,7 +118,6 @@
         <label for="ident">Número</label>
         <input id="ident" inputmode="numeric" placeholder="1556714">
       </div>
-      <button id="btn-abrir" class="neutro">Abrir en Chrome</button>
       <button id="btn-detalle" class="neutro">Traer detalle</button>
     </div>
     <div id="detalle" style="margin-top:16px"></div>
@@ -158,9 +174,10 @@
       <button id="btn-parar" class="parar" hidden>PARAR</button>
     </div>
     <p class="nota">
-      En sombra mira, decide y anota, pero no toca la pantalla. En vivo escribe
-      la tasa y aprieta “Modificar Tasa Cpr.”. Nunca toca el comitente, y si no
-      tenés una oferta viva en esa subasta no hay nada que modificar.
+      En sombra mira, decide y anota, sin mandar nada. En vivo manda la oferta.
+      De los ~70 campos que viajan, el bot solo decide dos: la tasa y la acción.
+      El comitente y su CUIT se copian tal cual los mandó el servidor, y si
+      alguno quedara con un valor distinto, no sale la orden.
     </p>
   </div>
 
@@ -199,10 +216,10 @@ function parametros(vivo) {
   };
 }
 
-$('btn-abrir').onclick = () => {
-  const ident = $('ident').value.trim();
-  if (!ident) return;
-  pedir('/api/abrir', {ident});
+$('btn-sesion').onclick = () => {
+  const cookie = $('cookie').value.trim();
+  if (!cookie) { alert('Pegá la cookie primero.'); return; }
+  pedir('/api/sesion', {cookie});
 };
 
 $('btn-detalle').onclick = () => {
@@ -286,11 +303,11 @@ function pintarLog(lineas) {
 async function refrescar() {
   let e;
   try { e = await (await fetch('/api/estado')).json(); }
-  catch { $('chip-chrome').textContent = 'Interfaz caída'; return; }
+  catch { $('chip-sesion').textContent = 'Interfaz caída'; return; }
 
-  const chrome = $('chip-chrome');
-  chrome.textContent = 'Chrome: ' + (e.chrome === 'ok' ? 'enganchado' : e.chrome);
-  chrome.className = 'chip ' + (e.chrome === 'ok' ? 'ok' : 'mal');
+  const ses = $('chip-sesion');
+  ses.textContent = 'Sesión: ' + (e.sesion ? 'conectada' : 'sin conectar');
+  ses.className = 'chip ' + (e.sesion ? 'ok' : 'mal');
 
   corriendo = e.corriendo;
   const modo = $('chip-modo');

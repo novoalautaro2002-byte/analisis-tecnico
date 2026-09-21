@@ -1,1 +1,2 @@
+# Solo para captura/*.py (relevamiento). La interfaz y el bot no lo necesitan.
 playwright>=1.40

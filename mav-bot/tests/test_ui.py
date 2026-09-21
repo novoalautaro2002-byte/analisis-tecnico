@@ -6,17 +6,8 @@ pare.
 """
 
 import sys
-import types
 import unittest
 from pathlib import Path
-
-if "playwright" not in sys.modules:
-    falso = types.ModuleType("playwright")
-    api = types.ModuleType("playwright.sync_api")
-    api.sync_playwright = lambda: None
-    falso.sync_api = api
-    sys.modules["playwright"] = falso
-    sys.modules["playwright.sync_api"] = api
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -32,10 +23,17 @@ BUENA = {
 }
 
 
+class SesionFalsa:
+    def get(self, *a, **k): return ""
+    def subasta(self, ident): return ""
+    def cheques(self, ident): return ""
+
+
 def trabajador(tmp):
     t = ui.Trabajador()
     t.eco = False
-    ui.AQUI = tmp          # los logs de prueba no van al repo
+    t.sesion = SesionFalsa()      # el arranque exige sesion conectada
+    ui.AQUI = tmp                 # los logs de prueba no van al repo
     return t
 
 
@@ -74,6 +72,13 @@ class TestArrancar(unittest.TestCase):
         with self.assertRaises(LibroIlegible):
             self.t._arrancar({**BUENA, "piso": "veinticinco"})
         self.assertIsNone(self.t.ciclo)
+
+    def test_sin_sesion_no_arranca(self):
+        self.t.sesion = None
+        self.t._arrancar(dict(BUENA))
+        self.assertFalse(self.t.estado["corriendo"])
+        self.assertIsNone(self.t.ciclo)
+        self.assertIn("cookie", self.t.estado["aviso"])
 
     def test_parar_activa_el_kill_switch(self):
         self.t._arrancar(dict(BUENA))
