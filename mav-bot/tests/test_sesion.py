@@ -162,5 +162,27 @@ class TestCodificacion(unittest.TestCase):
         self.assertEqual(CODIFICACION, "latin-1")
 
 
+
+class TestTextoVisible(unittest.TestCase):
+    """El detector de errores mira lo que se lee, no el codigo fuente."""
+
+    def test_ignora_los_nombres_de_elementos(self):
+        # `codigoincorrecto` es el id de un div que viene en TODO login: leerlo
+        # como mensaje hacia que cada ingreso pareciera rechazado.
+        from motor.sesion import texto_visible
+        html = '<div id="codigoincorrecto" style="display:none"></div><p>Hola</p>'
+        self.assertNotIn("incorrecto", texto_visible(html))
+
+    def test_ignora_el_javascript(self):
+        from motor.sesion import texto_visible
+        html = '<script>var x = "usuario o contraseña incorrectos";</script><p>ok</p>'
+        self.assertNotIn("incorrect", texto_visible(html))
+
+    def test_deja_pasar_un_error_de_verdad(self):
+        from motor.sesion import _ERROR, texto_visible
+        self.assertTrue(_ERROR.search(texto_visible(
+            "<body><p>Usuario o contraseña incorrectos.</p></body>")))
+
+
 if __name__ == "__main__":
     unittest.main()

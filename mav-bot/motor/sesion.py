@@ -47,8 +47,34 @@ _MARCAS_2FA = re.compile(
     r"""codigoexpirado|contador|reenviar|contexpir|tiempoexpir)["']?""", re.I)
 
 
+# El login trae siempre un cartel de ayuda que explica que hacer "si su usuario
+# se encuentra inhibido". Buscar errores sin sacarlo primero da un falso
+# positivo de inhibicion en cada ingreso.
+_AYUDA = re.compile(
+    r"<div[^>]*id=[\"']?deshinibhir-modal.*?</div>\s*</div>", re.I | re.S)
+
+
 def pide_codigo(html: str) -> bool:
     return bool(_MARCAS_2FA.search(html))
+
+
+_SCRIPT = re.compile(r"<script[\s\S]*?</script>", re.I)
+_ESTILO = re.compile(r"<style[\s\S]*?</style>", re.I)
+_COMENTARIO = re.compile(r"<!--[\s\S]*?-->")
+_TAG = re.compile(r"<[^>]+>")
+_ESPACIOS = re.compile(r"\s+")
+
+
+def texto_visible(html: str) -> str:
+    """Solo lo que el usuario lee en pantalla.
+
+    Buscar errores sobre el HTML crudo no sirve: `codigoincorrecto` es el id de
+    un elemento y `inhibido` vive en un cartel de ayuda que viene siempre. Los
+    dos hacian que cada ingreso pareciera fallado.
+    """
+    limpio = _AYUDA.sub("", html)
+    limpio = _COMENTARIO.sub("", _ESTILO.sub("", _SCRIPT.sub("", limpio)))
+    return _ESPACIOS.sub(" ", _TAG.sub(" ", limpio)).strip()
 
 
 class SesionCaida(Exception):
@@ -120,7 +146,7 @@ class Sesion:
             self._paso = None
             return None
 
-        error = _texto_de_error(_ERROR.search(html))
+        error = _texto_de_error(_ERROR.search(texto_visible(html)))
 
         if pide_codigo(html):
             try:
@@ -138,25 +164,30 @@ class Sesion:
                                  mensaje=error or "Te mandaron el código.")
 
         self._paso = None
-        raise IngresoRechazado(error or self._sin_entender(html))
+        raise IngresoRechazado(self._explicar(html, error))
 
-    def _sin_entender(self, html: str) -> str:
-        """Guarda la respuesta para poder mirarla, en vez de adivinar.
+    def _explicar(self, html: str, error: str | None) -> str:
+        """El motivo, y ademas la respuesta guardada.
 
-        Es la pagina de login de la plataforma, sin contraseñas: lo unico que
-        puede traer es el nombre de usuario.
+        Se guarda siempre que el ingreso falla, no solo cuando no se entiende:
+        un mensaje reconocido tambien puede estar mal interpretado, y sin el
+        HTML no hay forma de saberlo. Es la pantalla de login de la plataforma;
+        no lleva contraseñas, a lo sumo el nombre de usuario.
         """
-        if self.guardar_en is None:
-            return "la plataforma no acepto el ingreso"
-        try:
-            self.guardar_en.parent.mkdir(parents=True, exist_ok=True)
-            ruta = self.guardar_en.with_name(
-                f"ingreso_{int(reloj.time())}.html")
-            ruta.write_text(html, encoding=CODIFICACION, errors="replace")
-            return (f"No entendí la respuesta de la plataforma. La guardé en "
-                    f"{ruta.name} para poder mirarla.")
-        except Exception:
-            return "la plataforma no acepto el ingreso"
+        guardado = None
+        if self.guardar_en is not None:
+            try:
+                self.guardar_en.parent.mkdir(parents=True, exist_ok=True)
+                ruta = self.guardar_en.with_name(f"ingreso_{int(reloj.time())}.html")
+                ruta.write_text(html, encoding=CODIFICACION, errors="replace")
+                guardado = ruta.name
+            except Exception:
+                pass
+
+        base = error or "La plataforma no aceptó el ingreso."
+        if guardado:
+            return f"{base} Guardé la respuesta en logs/{guardado}."
+        return base
 
     def adentro(self) -> bool:
         """Confirma contra una pantalla real, no contra la respuesta del login."""
