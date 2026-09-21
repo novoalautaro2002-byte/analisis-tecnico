@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot MAV</title>
+<style>
+  :root {
+    --fondo: #0f1115; --panel: #171a21; --borde: #2a2f3a;
+    --texto: #e6e8ec; --suave: #949aa6; --tenue: #6b7280;
+    --acento: #4c8dff; --ok: #35c07f; --alerta: #f0a63c; --peligro: #e5484d;
+    --propia: #1d3a2a;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --fondo: #f4f5f7; --panel: #ffffff; --borde: #d8dbe0;
+      --texto: #14171c; --suave: #5a616e; --tenue: #878e9b;
+      --propia: #e2f6ea;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px 48px; background: var(--fondo); color: var(--texto);
+    font: 14px/1.5 -apple-system, "Segoe UI", system-ui, sans-serif;
+  }
+  .envoltorio { max-width: 1080px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+       color: var(--suave); margin: 0 0 12px; font-weight: 600; }
+  .barra { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+           margin-bottom: 18px; }
+  .chip { font-size: 12px; padding: 3px 10px; border-radius: 999px;
+          border: 1px solid var(--borde); color: var(--suave); }
+  .chip.ok { color: var(--ok); border-color: var(--ok); }
+  .chip.mal { color: var(--peligro); border-color: var(--peligro); }
+  .chip.vivo { color: var(--fondo); background: var(--peligro);
+               border-color: var(--peligro); font-weight: 700; }
+  .chip.sombra { color: var(--acento); border-color: var(--acento); }
+  .panel { background: var(--panel); border: 1px solid var(--borde);
+           border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .fila { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
+  label { display: block; font-size: 11px; color: var(--suave); margin-bottom: 4px; }
+  input {
+    background: var(--fondo); color: var(--texto); border: 1px solid var(--borde);
+    border-radius: 7px; padding: 8px 10px; font: inherit; width: 100%;
+  }
+  input:focus { outline: 2px solid var(--acento); outline-offset: -1px; }
+  .campo { flex: 1 1 130px; min-width: 110px; }
+  .campo.chico { flex: 0 0 100px; }
+  button {
+    background: var(--acento); color: #fff; border: 0; border-radius: 7px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.1); }
+  button:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+  button.neutro { background: transparent; color: var(--texto);
+                  border: 1px solid var(--borde); }
+  button.peligro { background: var(--peligro); }
+  button.parar { background: var(--peligro); font-size: 15px; padding: 11px 26px; }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-size: 11px; text-transform: uppercase;
+       letter-spacing: .05em; color: var(--tenue); padding: 0 8px 6px;
+       font-weight: 600; }
+  td { padding: 6px 8px; border-top: 1px solid var(--borde); }
+  tr.mia td { background: var(--propia); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .resumen { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 14px; }
+  .dato .k { font-size: 11px; color: var(--suave); }
+  .dato .v { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .aviso { border-left: 3px solid var(--alerta); background: var(--panel);
+           padding: 10px 14px; border-radius: 0 8px 8px 0; margin-bottom: 14px;
+           color: var(--texto); }
+  .log { font: 12px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace;
+         max-height: 280px; overflow-y: auto; }
+  .log div { display: flex; gap: 10px; padding: 1px 0; }
+  .log .hora { color: var(--tenue); flex: 0 0 auto; }
+  .log .haria { color: var(--acento); }
+  .log .cotizando, .log .verificacion { color: var(--ok); }
+  .log .bloqueado, .log .ceder { color: var(--alerta); }
+  .log .libro_ilegible, .log .parada, .log .cotizacion_dudosa { color: var(--peligro); }
+  .nota { font-size: 12px; color: var(--suave); margin-top: 10px; }
+  .vacio { color: var(--tenue); font-style: italic; }
+</style>
+</head>
+<body>
+<div class="envoltorio">
+
+  <div class="barra">
+    <h1>Bot MAV</h1>
+    <span class="chip" id="chip-chrome">Chrome: …</span>
+    <span class="chip" id="chip-modo" hidden></span>
+    <span class="chip" id="chip-reco" hidden></span>
+  </div>
+
+  <div id="aviso" class="aviso" hidden></div>
+
+  <div class="panel">
+    <h2>Subasta</h2>
+    <div class="fila">
+      <div class="campo chico">
+        <label for="ident">Número</label>
+        <input id="ident" inputmode="numeric" placeholder="1556714">
+      </div>
+      <button id="btn-detalle" class="neutro">Traer detalle</button>
+    </div>
+    <div id="detalle" style="margin-top:16px"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Parámetros</h2>
+    <div class="fila">
+      <div class="campo chico">
+        <label for="piso">Piso (tasa mínima)</label>
+        <input id="piso" placeholder="25,00">
+      </div>
+      <div class="campo chico">
+        <label for="dec-min">Baja mínima</label>
+        <input id="dec-min" value="0,01">
+      </div>
+      <div class="campo chico">
+        <label for="dec-max">Baja máxima</label>
+        <input id="dec-max" value="0,01">
+      </div>
+      <div class="campo chico">
+        <label for="esp-min">Espera mín. (s)</label>
+        <input id="esp-min" value="20">
+      </div>
+      <div class="campo chico">
+        <label for="esp-max">Espera máx. (s)</label>
+        <input id="esp-max" value="60">
+      </div>
+      <div class="campo chico">
+        <label for="prob">Prob. contestar</label>
+        <input id="prob" value="1.0">
+      </div>
+      <div class="campo chico">
+        <label for="max-reco">Máx. recotiz.</label>
+        <input id="max-reco" value="60">
+      </div>
+      <div class="campo chico">
+        <label for="int-min">Intervalo mín. (s)</label>
+        <input id="int-min" value="10">
+      </div>
+    </div>
+    <p class="nota">
+      El piso es la tasa más baja que aceptás: abajo de eso, cede el cheque.
+      La baja máxima por encima de la mínima hace que el paso varíe, para no ser
+      predecible. La espera evita contestar al instante siempre.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>Control</h2>
+    <div class="fila" id="controles">
+      <button id="btn-sombra">Arrancar en sombra</button>
+      <button id="btn-vivo" class="peligro">Arrancar en VIVO</button>
+      <button id="btn-parar" class="parar" hidden>PARAR</button>
+    </div>
+    <p class="nota">
+      En sombra mira, decide y anota, pero no toca la pantalla. En vivo escribe
+      la tasa y aprieta “Modificar Tasa Cpr.”. Nunca toca el comitente, y si no
+      tenés una oferta viva en esa subasta no hay nada que modificar.
+    </p>
+  </div>
+
+  <div class="panel">
+    <h2>Actividad</h2>
+    <div class="log" id="log"><span class="vacio">Sin actividad todavía.</span></div>
+  </div>
+
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let corriendo = false;
+
+async function pedir(ruta, cuerpo) {
+  const r = await fetch(ruta, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(cuerpo || {}),
+  });
+  return r.json();
+}
+
+function parametros(vivo) {
+  return {
+    ident: $('ident').value.trim(),
+    piso: $('piso').value.trim(),
+    decremento_min: $('dec-min').value.trim(),
+    decremento_max: $('dec-max').value.trim(),
+    espera_min: $('esp-min').value.trim() || '0',
+    espera_max: $('esp-max').value.trim() || '0',
+    prob: $('prob').value.trim() || '1',
+    max_recotizaciones: $('max-reco').value.trim() || '60',
+    intervalo_min: $('int-min').value.trim() || '10',
+    vivo: vivo,
+  };
+}
+
+$('btn-detalle').onclick = () => {
+  const ident = $('ident').value.trim();
+  if (!ident) return;
+  pedir('/api/detalle', {ident});
+};
+
+$('btn-sombra').onclick = () => {
+  if (!$('ident').value.trim() || !$('piso').value.trim()) {
+    alert('Falta el número de subasta o el piso.');
+    return;
+  }
+  pedir('/api/arrancar', parametros(false));
+};
+
+$('btn-vivo').onclick = () => {
+  const p = parametros(true);
+  if (!p.ident || !p.piso) {
+    alert('Falta el número de subasta o el piso.');
+    return;
+  }
+  const ok = confirm(
+    'MODO VIVO\n\n' +
+    'El bot va a cargar ofertas reales en la subasta ' + p.ident + '.\n' +
+    'Piso: ' + p.piso + '\n\n' +
+    '¿Seguro?'
+  );
+  if (ok) pedir('/api/arrancar', p);
+};
+
+$('btn-parar').onclick = () => pedir('/api/parar');
+
+function pintarLibro(libro) {
+  const caja = $('detalle');
+  if (!libro) { caja.innerHTML = ''; return; }
+  if (!libro.ofertas.length) {
+    caja.innerHTML = '<p class="vacio">El libro de esa subasta está vacío.</p>';
+    return;
+  }
+  const estado = libro.mia
+    ? (libro.gano ? 'vas ganando' : 'te están superando')
+    : 'no tenés oferta propia';
+  caja.innerHTML = `
+    <div class="resumen">
+      <div class="dato"><div class="k">Tu tasa</div>
+        <div class="v">${libro.mia || '—'}</div></div>
+      <div class="dato"><div class="k">Mejor ajena</div>
+        <div class="v">${libro.mejor_ajena || '—'}</div></div>
+      <div class="dato"><div class="k">Situación</div>
+        <div class="v" style="font-size:15px;color:${
+          libro.gano ? 'var(--ok)' : 'var(--alerta)'}">${estado}</div></div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>Agente</th><th class="num">Tasa</th><th>Ingreso</th>
+        <th class="num">Oferta</th>
+      </tr></thead>
+      <tbody>${libro.ofertas.map(o => `
+        <tr class="${o.propia ? 'mia' : ''}">
+          <td>${o.propia ? 'vos (' + o.agente + ')' : o.agente}</td>
+          <td class="num">${o.tasa}</td>
+          <td>${o.hora}</td>
+          <td class="num">${o.id}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function pintarLog(lineas) {
+  const caja = $('log');
+  if (!lineas || !lineas.length) return;
+  const abajo = caja.scrollTop + caja.clientHeight >= caja.scrollHeight - 30;
+  caja.innerHTML = lineas.map(l =>
+    `<div class="${l.evento}"><span class="hora">${l.t}</span>` +
+    `<span>${l.texto.replace(/[<>&]/g, c =>
+      ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</span></div>`).join('');
+  if (abajo) caja.scrollTop = caja.scrollHeight;
+}
+
+async function refrescar() {
+  let e;
+  try { e = await (await fetch('/api/estado')).json(); }
+  catch { $('chip-chrome').textContent = 'Interfaz caída'; return; }
+
+  const chrome = $('chip-chrome');
+  chrome.textContent = 'Chrome: ' + (e.chrome === 'ok' ? 'enganchado' : e.chrome);
+  chrome.className = 'chip ' + (e.chrome === 'ok' ? 'ok' : 'mal');
+
+  corriendo = e.corriendo;
+  const modo = $('chip-modo');
+  modo.hidden = !e.modo;
+  if (e.modo) {
+    modo.textContent = e.modo === 'vivo' ? 'VIVO' : 'sombra';
+    modo.className = 'chip ' + (e.modo === 'vivo' ? 'vivo' : 'sombra');
+  }
+
+  const reco = $('chip-reco');
+  reco.hidden = !e.corriendo;
+  reco.textContent = e.recotizaciones + ' movimiento(s)';
+
+  $('btn-sombra').disabled = e.corriendo;
+  $('btn-vivo').disabled = e.corriendo;
+  $('btn-parar').hidden = !e.corriendo;
+
+  const aviso = $('aviso');
+  aviso.hidden = !e.aviso;
+  if (e.aviso) aviso.textContent = e.aviso;
+
+  if (e.libro) pintarLibro(e.libro);
+  pintarLog(e.log);
+}
+
+refrescar();
+setInterval(refrescar, 1500);
+</script>
+</body>
+</html>

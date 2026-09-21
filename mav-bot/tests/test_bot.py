@@ -1,4 +1,4 @@
-"""Tests de las piezas del bot que hablan con el navegador.
+"""Tests de la unica capa que habla con el navegador.
 
 Se stubea Playwright: lo que importa es que encuentre el frame correcto y que
 pare cuando no entiende lo que lee. La decision y el gate ya estan probados
@@ -22,7 +22,7 @@ if "playwright" not in sys.modules:
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import bot  # noqa: E402
+from motor import pantalla  # noqa: E402
 from tests.test_libro import armar_html  # noqa: E402
 
 
@@ -76,23 +76,23 @@ class TestBuscarMarco(unittest.TestCase):
             Marco(BASE + "k-cabeceranew.r"),
             Marco(BASE + "cpd-versubasta.r?ident=1556714"),
         )
-        _, marco = bot.buscar_marco(nav, 1556714)
+        _, marco = pantalla.buscar_marco(nav, 1556714)
         self.assertIsNotNone(marco)
         self.assertIn("ident=1556714", marco.url)
 
     def test_ignora_otra_subasta(self):
         # Si hay dos subastas abiertas, el bot solo toca la suya.
         nav = navegador_con(Marco(BASE + "cpd-versubasta.r?ident=999999"))
-        _, marco = bot.buscar_marco(nav, 1556714)
+        _, marco = pantalla.buscar_marco(nav, 1556714)
         self.assertIsNone(marco)
 
     def test_ignora_otras_pantallas(self):
         nav = navegador_con(Marco(BASE + "cpd-subastas-listado.r?ident=1556714"))
-        _, marco = bot.buscar_marco(nav, 1556714)
+        _, marco = pantalla.buscar_marco(nav, 1556714)
         self.assertIsNone(marco)
 
     def test_sin_nada_abierto(self):
-        self.assertEqual(bot.buscar_marco(Navegador([]), 1556714), (None, None))
+        self.assertEqual(pantalla.buscar_marco(Navegador([]), 1556714), (None, None))
 
 
 class TestLeerLibro(unittest.TestCase):
@@ -100,18 +100,18 @@ class TestLeerLibro(unittest.TestCase):
         html = armar_html(1556714, [
             {"id": 1, "ag": "442", "tasa": "26,00", "hora": "11:00:00", "propia": True},
         ])
-        libro = bot.leer_libro(Marco("x", html), Log())
+        libro = pantalla.leer_libro(Marco("x", html), Log())
         self.assertEqual(libro.ident, 1556714)
 
     def test_pantalla_desconocida_devuelve_none(self):
         # Si MAV cambia la pantalla, el bot tiene que parar, no improvisar.
         log = Log()
-        self.assertIsNone(bot.leer_libro(Marco("x", "<html>otra cosa</html>"), log))
+        self.assertIsNone(pantalla.leer_libro(Marco("x", "<html>otra cosa</html>"), log))
         self.assertIn("libro_ilegible", log.eventos)
 
     def test_frame_recargandose_devuelve_none(self):
         log = Log()
-        self.assertIsNone(bot.leer_libro(MarcoRoto("x"), log))
+        self.assertIsNone(pantalla.leer_libro(MarcoRoto("x"), log))
         self.assertIn("lectura_fallida", log.eventos)
 
 
@@ -124,8 +124,8 @@ class TestSelectores(unittest.TestCase):
         self.assertIn('name="tasa"', html)
         self.assertIn('value="Modificar Tasa Cpr."', html)
         # Los selectores del bot tienen que coincidir con eso, literal.
-        self.assertEqual(bot.SEL_TASA, 'input[name="tasa"]')
-        self.assertEqual(bot.SEL_BOTON, 'input[value="Modificar Tasa Cpr."]')
+        self.assertEqual(pantalla.SEL_TASA, 'input[name="tasa"]')
+        self.assertEqual(pantalla.SEL_BOTON, 'input[value="Modificar Tasa Cpr."]')
 
 
 if __name__ == "__main__":
