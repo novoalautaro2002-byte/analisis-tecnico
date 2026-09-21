@@ -28,6 +28,19 @@ máquina mientras el bot corre.
 
 ## Captura de pantallas
 
+### La forma corta
+
+Poné los cuatro archivos de `captura/` en una misma carpeta y:
+
+1. Doble clic en **`arrancar.bat`**. Instala lo que falte, abre el navegador con
+   perfil aparte y espera.
+2. Te logueás con tu 2FA, vas a la pantalla de subasta, volvés y apretás una
+   tecla. Ahí arranca a capturar.
+3. Operás normal. Toma todas las pantallas que abras. `Ctrl+C` al terminar.
+4. Doble clic en **`limpiar.bat`**, que anonimiza la última captura.
+
+El resto de esta sección es el paso a paso a mano, por si algo falla.
+
 ### 1. Instalar
 
 ```
