@@ -22,7 +22,7 @@ BUENA = {
     "ident": 1556714, "piso": "25,00",
     "decremento_min": "0,01", "decremento_max": "0,03",
     "prob": "1", "espera_min": "0", "espera_max": "0",
-    "sondeo": "1", "max_recotizaciones": "60",
+    "sondeo": "1", "max_recotizaciones": "200",
 }
 
 

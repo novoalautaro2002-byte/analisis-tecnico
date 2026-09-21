@@ -61,8 +61,10 @@ class ConfigSubasta:
     """Demora antes de recotizar. Contestar siempre en 300ms es una firma que se
     aprende en una tarde. Contra humanos, ademas, no sirve de nada."""
 
-    max_recotizaciones: int = 60
-    """Tope por subasta y por sesion. Cualquier loop se choca contra esto."""
+    max_recotizaciones: int = 200
+    """Tope por subasta y por sesion. Es un freno anti-loop, no un limite de
+    riesgo — ese es el piso. Una guerra de un punto entero a un centavo por
+    paso son 50 movimientos, asi que el tope tiene que dar aire de sobra."""
 
     sondeo_s: float = 2.0
     """Cada cuanto releer el libro cuando no hay nada que hacer.
