@@ -76,26 +76,38 @@ def fusionar(libros: list[Libro]) -> Historia:
 
     ordenados = tuple(sorted(libros, key=_hora_captura))
 
-    por_id: dict[int, Oferta] = {}
+    # La clave incluye la tasa y la hora, no solo el id: el libro guarda las
+    # ofertas vivas y nada mas, y una recotizacion reescribe la oferta en el
+    # lugar. Deduplicar por id solo se comeria todos los pasos de la guerra y
+    # dejaria un unico movimiento donde hubo cincuenta.
+    estados: dict[tuple[int, Decimal, time], Oferta] = {}
+    fue_propia: set[int] = set()
     for lib in ordenados:
         for o in lib.ofertas:
-            previa = por_id.get(o.id)
-            # Si en alguna captura aparecio como propia, esa version gana: el
-            # link de baja se pierde cuando la subasta cierra.
-            if previa is None or (o.propia and not previa.propia):
-                por_id[o.id] = o
+            estados[(o.id, o.tasa, o.ingreso)] = o
+            if o.propia:
+                # El link de baja se pierde cuando la subasta cierra, asi que
+                # alcanza con haberla visto propia una vez.
+                fue_propia.add(o.id)
+
+    ofertas = tuple(sorted(
+        (o if o.propia or o.id not in fue_propia
+         else Oferta(id=o.id, agente=o.agente, tasa=o.tasa,
+                     ingreso=o.ingreso, propia=True)
+         for o in estados.values()),
+        key=lambda o: (o.ingreso, o.id),
+    ))
 
     ultima = ordenados[-1]
     vivos = {o.id for o in ultima.ofertas}
     corte = _hora_captura(ultima)
     retiradas = frozenset(
-        id_ for id_, o in por_id.items()
-        if id_ not in vivos and o.ingreso <= corte
+        o.id for o in ofertas if o.id not in vivos and o.ingreso <= corte
     )
 
     return Historia(
         ident=ordenados[0].ident,
-        ofertas=tuple(sorted(por_id.values(), key=lambda o: (o.ingreso, o.id))),
+        ofertas=ofertas,
         retiradas=retiradas,
         libros=ordenados,
     )

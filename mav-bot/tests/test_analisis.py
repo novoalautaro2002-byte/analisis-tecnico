@@ -105,5 +105,34 @@ class TestClasificar(unittest.TestCase):
         self.assertEqual(veredicto, "bot")
 
 
+class TestRecotizacionesEnElMismoId(unittest.TestCase):
+    """El libro solo guarda ofertas vivas: recotizar reescribe la oferta.
+
+    Si se deduplica por id, una guerra de cincuenta pasos queda reducida a un
+    solo movimiento.
+    """
+
+    def test_conserva_cada_paso_de_la_guerra(self):
+        capturas = [
+            lib([of(9, "442", "26,00", "11:00:00", propia=True)]),
+            lib([of(9, "442", "25,98", "11:00:40", propia=True)]),
+            lib([of(9, "442", "25,96", "11:01:20", propia=True)]),
+        ]
+        h = fusionar(capturas)
+        self.assertEqual([str(o.tasa) for o in h.ofertas], ["26.00", "25.98", "25.96"])
+        self.assertEqual(h.retiradas, frozenset())
+
+    def test_mide_las_respuestas_de_una_guerra_larga(self):
+        capturas = [
+            lib([of(1, "406", "26,00", "11:00:00"),
+                 of(2, "442", "25,99", "11:00:30", propia=True)]),
+            lib([of(1, "406", "25,98", "11:01:00"),
+                 of(2, "442", "25,97", "11:01:30", propia=True)]),
+        ]
+        rs = reacciones(fusionar(capturas), "442")
+        self.assertEqual(len(rs), 2)
+        self.assertEqual([r.demora_s for r in rs], [30.0, 30.0])
+
+
 if __name__ == "__main__":
     unittest.main()
