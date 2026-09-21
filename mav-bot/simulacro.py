@@ -59,6 +59,12 @@ PAUSA_ENTRE_RUEDAS_S = 12.0
 # que rompía al bot, así que el simulacro lo exagera a propósito.
 DEMORA_EN_VERSE_S = 1.2
 
+# Si `altaCompra` con `id` vacio MODIFICA la oferta del agente o deja una nueva
+# cada vez. Contra MAV real no lo sabemos todavia. En True el simulacro modifica
+# (lo que asumimos); en False agrega, que es el caso feo, y sirve para
+# comprobar que el bot lo detecta y frena en vez de llenar el libro de ordenes.
+MODIFICA = True
+
 
 # Los tests importan este modulo: sin esto, cada alta ensucia su salida.
 RUIDO = True
@@ -140,9 +146,16 @@ class Subasta:
     # -- escritura ---------------------------------------------------------
 
     def cargar(self, agente: str, tasa: Decimal, quien: str) -> None:
-        """Alta o modificación. Un agente tiene una oferta por subasta."""
+        """Alta o modificación. Un agente tiene una oferta por subasta.
+
+        Salvo que `MODIFICA` esté en False: ahí cada alta deja una oferta más,
+        que es la otra forma en que MAV *podría* estar interpretando el
+        `altaCompra` con `id` vacío. No sabemos cuál de las dos es, así que el
+        simulacro sabe hacer las dos y el bot tiene que sobrevivir a ambas.
+        """
         with self.candado:
-            self.ofertas = [o for o in self.ofertas if o["agente"] != agente]
+            if MODIFICA:
+                self.ofertas = [o for o in self.ofertas if o["agente"] != agente]
             self.proximo_id += 1
             self.ofertas.append({
                 "id": self.proximo_id, "agente": agente, "tasa": tasa,

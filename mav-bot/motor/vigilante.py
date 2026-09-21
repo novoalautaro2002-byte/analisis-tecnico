@@ -134,8 +134,8 @@ class Vigilante:
         self._leido_s = 0.0
         self._estable = False
 
-        # Confirmacion pendiente de la ultima oferta: (tasa, hasta cuando).
-        self.confirmar: tuple[Decimal, float] | None = None
+        # Confirmacion pendiente: (tasa, hasta cuando, cuantas propias habia).
+        self.confirmar: tuple[Decimal, float, int] | None = None
 
     # -- control -----------------------------------------------------------
 
@@ -271,7 +271,13 @@ class Vigilante:
         # Después de tocar el libro no se saltea nada: la vuelta que viene se
         # lee de nuevo, pase lo que pase con el POST.
         self._huella_leida = None
-        veredicto = evaluar(decision, self.cfg, self.estado, ahora_s, 0.0)
+        # La antiguedad real de la lectura, no un cero puesto a mano. Hoy el
+        # libro se lee siempre justo antes de decidir, asi que da ~0 — pero
+        # cablearlo hacia que el control de "nunca cotizar sobre un libro
+        # viejo" fuera decorativo, y el dia que el flujo cambie tiene que
+        # seguir siendo cierto.
+        antiguedad = max(0.0, ahora_s - self._leido_s)
+        veredicto = evaluar(decision, self.cfg, self.estado, ahora_s, antiguedad)
         if not veredicto:
             self.log("bloqueado", f"[{self.cfg.ident}] gate: {veredicto.motivo}")
             self._fase(Fase.MIRANDO, veredicto.motivo)
@@ -305,7 +311,8 @@ class Vigilante:
 
         # La oferta no se da por buena hasta verla en el libro, pero tampoco se
         # frena por no verla en el primer intento: se abre una ventana.
-        self.confirmar = (decision.tasa, ahora_s + VENTANA_CONFIRMACION_S)
+        self.confirmar = (decision.tasa, ahora_s + VENTANA_CONFIRMACION_S,
+                          len(libro.propias))
         self._fase(Fase.CONFIRMANDO, f"mandé {texto}, esperando verla en el libro")
         self.proxima_s = ahora_s + REINTENTO_CONFIRMACION_S
 
@@ -317,9 +324,9 @@ class Vigilante:
         frena, porque no saber qué entró es la única situación que no se arregla
         mirando de nuevo.
         """
-        tasa, hasta_s = self.confirmar
+        tasa, hasta_s, propias_antes = self.confirmar
         libro = self._leer(ahora_s)
-        v = verificar_despues(libro, self.cfg, tasa)
+        v = verificar_despues(libro, self.cfg, tasa, propias_antes)
         if v:
             self.confirmar = None
             self.log("verificacion", f"[{self.cfg.ident}] ok: {v.motivo}", ok=True)

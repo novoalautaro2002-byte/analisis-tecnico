@@ -377,6 +377,38 @@ class TestConfirmacion(unittest.TestCase):
         self.assertIs(v.fase, Fase.MIRANDO, "entro igual; el libro lo dice")
         self.assertEqual(len(s.posts), 1)
 
+    def test_si_la_plataforma_agrega_en_vez_de_modificar_frena(self):
+        """La pregunta abierta sobre MAV: altaCompra con id vacio, ¿modifica?
+
+        Asumimos que si. Si no fuera asi, cada recotizacion dejaria una oferta
+        mas viva, y una guerra de cincuenta pasos serian cincuenta ordenes de
+        compra donde tendria que haber una. Mirar solo la mejor propia no lo
+        detecta, porque la nueva siempre es la mejor.
+        """
+        class Acumula(SesionFalsa):
+            def _quizas_mostrar(self):
+                if self.pendiente is None:
+                    return
+                ident, tasa, faltan = self.pendiente
+                if faltan > 0:
+                    self.pendiente = (ident, tasa, faltan - 1)
+                    return
+                self.pendiente = None
+                # La vieja NO se va: queda viva al lado de la nueva.
+                self.paginas[ident] = pantalla([
+                    mia("27,00", id=1), mia(tasa, hora="10:05:00", id=7),
+                    ajena("26,99", id=2),
+                ], ident)
+
+        s = Acumula()
+        v = Vigilante(config(), s, vivo=True, log=Log())
+        v.tick(1000.0)
+        for i in range(1, 20):
+            v.tick(1000.0 + i * 0.5)
+        self.assertIs(v.fase, Fase.DETENIDO)
+        self.assertIn("AGREGANDO", v.detalle)
+        self.assertEqual(len(s.posts), 1, "no manda una segunda encima")
+
     def test_sigue_peleando_despues_de_confirmar(self):
         # Lo otro que se pedia: que no se pare sola tras una sola jugada.
         s = SesionFalsa()

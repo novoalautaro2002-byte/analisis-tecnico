@@ -113,13 +113,22 @@ def evaluar(
     return Veredicto(True, f"habilitado a cotizar {tasa}")
 
 
-def verificar_despues(libro_nuevo, cfg: ConfigSubasta, tasa_esperada: Decimal) -> Veredicto:
+def verificar_despues(libro_nuevo, cfg: ConfigSubasta, tasa_esperada: Decimal,
+                      propias_antes: int | None = None) -> Veredicto:
     """Relee el libro despues de cotizar y confirma que entro lo que queriamos.
 
     Reemplaza al control de preview que esta plataforma no tiene. Si no coincide,
     el bot para: puede ser que el POST no haya entrado, que haya entrado otra
     cosa, o que alguien se haya metido en el medio. Ninguna de las tres se
     resuelve reintentando a ciegas.
+
+    `propias_antes` es cuantas ofertas propias habia antes de cotizar, y sirve
+    para una pregunta que todavia no tiene respuesta de la plataforma real: si
+    `altaCompra` con `id` vacio MODIFICA la oferta del agente o crea una nueva.
+    Asumimos que modifica. Si no fuera asi, cada recotizacion dejaria una oferta
+    mas viva en el libro, y en una guerra de cincuenta pasos eso son cincuenta
+    ordenes de compra donde tendria que haber una. Mirar solo la mejor propia no
+    lo detecta — la nueva siempre es la mejor — asi que se cuentan.
     """
     if libro_nuevo.ident != cfg.ident:
         return Veredicto(False, f"el libro releido es de la subasta {libro_nuevo.ident}")
@@ -131,4 +140,14 @@ def verificar_despues(libro_nuevo, cfg: ConfigSubasta, tasa_esperada: Decimal) -
         return Veredicto(
             False, f"esperaba mi oferta en {tasa_esperada} y la leo en {mia.tasa}"
         )
+
+    ahora = len(libro_nuevo.propias)
+    if propias_antes is not None and ahora > max(propias_antes, 1):
+        return Veredicto(
+            False,
+            f"tenia {propias_antes} oferta(s) propia(s) y ahora hay {ahora}: la "
+            f"plataforma esta AGREGANDO en vez de modificar. Paro y reviso a "
+            f"mano antes de dejar otra orden viva."
+        )
+
     return Veredicto(True, f"confirmado: mi oferta quedo en {mia.tasa}")
