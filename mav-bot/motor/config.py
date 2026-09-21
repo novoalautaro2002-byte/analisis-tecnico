@@ -14,7 +14,11 @@ from .libro import PASO
 # Banda de tasas plausibles. No es un limite operativo, es el cinturon contra un
 # error de parseo: si leer "26,99" da 2699, la decision se aborta antes de
 # convertirse en una oferta de 2698,99.
-TASA_MIN_ABSOLUTA = Decimal("-50")
+#
+# El piso en cero y no en negativo: en la plataforma la tasa negativa existe
+# solo para PAGARE y FCE, y este bot opera cheques (CPD/ECHEQ). Si alguna vez
+# hiciera falta, se cambia aca — pero que sea una decision y no un descuido.
+TASA_MIN_ABSOLUTA = Decimal("0")
 TASA_MAX_ABSOLUTA = Decimal("500")
 
 # Piso del sondeo. Mas rapido que esto no trae informacion nueva — el servidor

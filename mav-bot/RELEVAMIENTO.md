@@ -381,3 +381,49 @@ mejore. Tres consecuencias, y son la base del diseño:
 La reacción sí importa en un caso: si el rival mejora y el bot tarda más de 3
 minutos en enterarse, la subasta se ejecuta. Con un sondeo de 1–3 segundos ese
 margen sobra por dos órdenes de magnitud.
+
+## CONFIRMADO por el trader: el alta de compra
+
+Respuestas del operador, 21/09. Confirman lo que el HTML decía, y cierran las
+dudas que quedaban sobre el camino de escritura.
+
+| Pregunta | Respuesta |
+|---|---|
+| Al bajar la tasa, ¿queda una fila tuya o dos? | **Una.** Queda la nueva y desaparece la vieja. |
+| ¿Qué botón apretás? | *"Modificar intención de compra"*. |
+| ¿Hay que dar de baja la vieja primero? | **No.** |
+| ¿Pide confirmar? | Sí, un cartel, y le da OK. |
+| ¿Cuánto tarda en verse en la grilla? | **A la milésima** de tocar el botón. |
+| ¿Una tasa por lote o por cheque? | **Una por todo el lote.** |
+| ¿Se pueden tener dos ofertas propias en la misma subasta? | **No se puede.** |
+| ¿Viste rechazos además del comitente? | **Jamás.** |
+
+### Qué significa cada una para el bot
+
+- **El botón de modificar es el mismo POST que el alta.** El HTML ya lo decía
+  (`ofertaCompra()` hace `action.value="altaCompra"` y postea), y el trader lo
+  confirma desde el otro lado: una sola fila por agente. El bot manda
+  `altaCompra` en cada recotización y eso es correcto, no un atajo.
+- **El cartel es un `window.confirm()` del navegador**, no una pantalla
+  intermedia del servidor. Saltearlo no saltea ningún paso: el POST que sale
+  después del OK es idéntico al que manda el bot.
+- **Una sola oferta propia por subasta** convierte al contador de
+  `verificar_despues()` en lo que tiene que ser: una red que no se toca nunca.
+  Si alguna vez hay dos, algo cambió en la plataforma y hay que mirarlo a mano.
+- **La grilla se actualiza al instante**, así que los 6 segundos de paciencia
+  de la ventana de confirmación sobran por mucho. Si pasado ese tiempo la
+  oferta no está, no es lentitud: es que no entró.
+- **Nunca vio un rechazo** más allá del comitente faltante. No hay una familia
+  de carteles de error que haya que aprender a leer.
+
+### Lo que faltaba replicar del cliente, y ya está
+
+`ofertaCompra()` valida antes de postear, y el bot no pasa por ahí:
+
+- Tasa con **coma** decimal — `formatear_tasa()`.
+- Comitente **numérico y distinto de cero** — `armar_oferta()`. Un `"0"` no lo
+  agarraba el control de campos vacíos, y es exactamente como se ve un
+  comitente que no quedó cargado.
+- CUIT obligatorio — cubierto por el control de campos por cheque.
+- Tasa negativa solo en `PAGARE` y `FCE`: este bot opera cheques, así que el
+  piso de la banda plausible pasó de `-50` a `0` (`config.TASA_MIN_ABSOLUTA`).

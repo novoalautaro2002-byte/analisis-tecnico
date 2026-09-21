@@ -125,6 +125,20 @@ def armar_oferta(html_subasta: str, html_cheques: str, tasa: str) -> Payload:
             f"hay {len(faltantes)} campo(s) por cheque sin valor: {faltantes[:3]}"
         )
 
+    # El JS de la pantalla exige que el comitente sea numerico y distinto de
+    # cero. El bot postea directo, asi que la validacion la tiene que hacer el.
+    # Un "0" no lo agarra el control de arriba — no esta vacio — y es
+    # exactamente como se ve un comitente que no quedo cargado.
+    for nombre, valor in campos.items():
+        if not nombre.startswith("comitcpr"):
+            continue
+        limpio = valor.strip()
+        if not limpio.isdigit() or int(limpio) == 0:
+            raise FormularioIlegible(
+                f"el comitente de {nombre!r} es {valor!r}, que no es un numero "
+                f"de comitente valido"
+            )
+
     campos["tasa"] = tasa
     campos["action"] = ALTA_COMPRA
 

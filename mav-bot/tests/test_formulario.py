@@ -173,5 +173,37 @@ class TestBaja(unittest.TestCase):
         self.assertEqual(p.campos["ident"], "1556714")
 
 
+class TestValidacionesDelCliente(unittest.TestCase):
+    """Las que hace el JS de la pantalla y el bot tiene que repetir.
+
+    El bot postea directo, sin pasar por `ofertaCompra()`. Todo lo que esa
+    funcion valida antes de mandar, lo tiene que validar el bot o manda cosas
+    que el servidor puede llegar a aceptar mal.
+    """
+
+    def test_el_comitente_en_cero_no_pasa(self):
+        # No esta vacio, asi que el control de campos en blanco no lo agarra.
+        # Y es exactamente como se ve un comitente que no quedo cargado.
+        with self.assertRaises(FormularioIlegible):
+            armar_oferta(html_subasta(), html_cheques(comitente="0"), "26,98")
+
+    def test_un_comitente_que_no_es_numero_no_pasa(self):
+        with self.assertRaises(FormularioIlegible):
+            armar_oferta(html_subasta(), html_cheques(comitente="ACME"), "26,98")
+
+    def test_un_comitente_negativo_no_pasa(self):
+        with self.assertRaises(FormularioIlegible):
+            armar_oferta(html_subasta(), html_cheques(comitente="-5"), "26,98")
+
+    def test_el_comitente_normal_pasa(self):
+        p = armar_oferta(html_subasta(), html_cheques(comitente="51414"), "26,98")
+        self.assertEqual(dict(p.pares())[f"comitcpr{CHEQUES[0]}"], "51414")
+
+    def test_la_tasa_viaja_con_coma(self):
+        # Con punto, el JS de la plataforma rechaza antes de postear.
+        p = armar_oferta(html_subasta(), html_cheques(), "26,98")
+        self.assertEqual(dict(p.pares())["tasa"], "26,98")
+
+
 if __name__ == "__main__":
     unittest.main()
