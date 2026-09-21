@@ -35,6 +35,11 @@ se reinicia en cada mejora.
 Poné el piso en `26,50` y el bot gana la subasta. Ponelo en `26,96` y lo vas a
 ver **ceder** en vez de perforarlo. Esas dos corridas son la demostración.
 
+Tomate el tiempo que quieras: el mercado está congelado hasta que el bot abre la
+subasta, así que nada se mueve mientras te logueás y llenás el formulario. Y
+cuando una rueda termina, a los doce segundos se abre otra sola con tu oferta de
+nuevo en 27,00 — solo hay que volver a sumarla en la pantalla.
+
 ## Cómo está armado
 
 | Módulo | Qué hace |

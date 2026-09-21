@@ -21,10 +21,11 @@ from motor.formulario import armar_oferta  # noqa: E402
 from motor.libro import parsear_libro  # noqa: E402
 
 
-def mercado():
+def mercado(mirada=True):
+    """Una subasta recién abierta, con la oferta propia a mano en 27,00."""
     s = simulacro.Subasta()
-    s.cargar("442", Decimal("27.00"), "a mano")
-    s.ofertas[0]["cargada_s"] = 0.0          # ya visible
+    if mirada:
+        s.mirar()
     return s
 
 
@@ -103,6 +104,71 @@ class TestCierreBlando(unittest.TestCase):
         s.cierra_s = 0.0                       # a punto de cerrar
         s.cargar("406", Decimal("26.99"), "rival")
         self.assertGreater(s.falta_s(), simulacro.CUENTA_S - 1)
+
+
+class TestElRelojNoCorreSolo(unittest.TestCase):
+    """La demo se arruinaba sola: la subasta cerraba durante el login.
+
+    El reloj arrancaba con el servidor, así que los 45 segundos se gastaban
+    mientras el trader se logueaba y llenaba el formulario. Cuando el bot iba a
+    mirar, ya estaba negociada.
+    """
+
+    def test_sin_que_nadie_mire_no_hay_cuenta_regresiva(self):
+        s = mercado(mirada=False)
+        self.assertEqual(s.falta_s(), float("inf"))
+        s.latir()
+        self.assertEqual(s.estado, "Activa")
+
+    def test_el_rival_tampoco_se_mueve_antes(self):
+        s = mercado(mirada=False)
+        r = simulacro.Rival(s)
+        r.proximo_s = 0.0
+        r.latir()
+        self.assertEqual(len(s.ofertas), 1, "el mercado no se mueve para nadie")
+
+    def test_la_cuenta_arranca_al_abrir_la_subasta(self):
+        s = mercado(mirada=False)
+        s.mirar()
+        self.assertLessEqual(s.falta_s(), simulacro.CUENTA_S)
+        self.assertGreater(s.falta_s(), simulacro.CUENTA_S - 1)
+
+    def test_la_ficha_es_legible_aunque_no_haya_arrancado(self):
+        # falta_s() es infinito ahí: si se usa tal cual, revienta la fecha.
+        f = leer_ficha(simulacro.fila_listado(mercado(mirada=False)))
+        self.assertTrue(f.hora_cierre)
+
+
+class TestRuedaNueva(unittest.TestCase):
+    """Cerrada una, se abre otra sola: probar de nuevo no obliga a reiniciar."""
+
+    def test_reabre_despues_de_la_pausa(self):
+        s = mercado()
+        s.cierra_s = 0.0
+        s.latir()
+        self.assertEqual(s.estado, "Negociada")
+        s.reabre_s = 0.0                       # como si ya hubiera pasado
+        self.assertTrue(s.latir())
+        self.assertEqual(s.estado, "Activa")
+        self.assertEqual(s.ronda, 2)
+
+    def test_la_rueda_nueva_trae_tu_oferta_a_mano(self):
+        s = mercado()
+        s.cierra_s = 0.0
+        s.latir()
+        s.reabre_s = 0.0
+        s.latir()
+        self.assertEqual(len(s.ofertas), 1)
+        self.assertEqual(s.ofertas[0]["tasa"], Decimal("27.00"))
+        self.assertEqual(s.ofertas[0]["agente"], "442")
+
+    def test_la_rueda_nueva_tampoco_corre_sola(self):
+        s = mercado()
+        s.cierra_s = 0.0
+        s.latir()
+        s.reabre_s = 0.0
+        s.latir()
+        self.assertEqual(s.falta_s(), float("inf"))
 
 
 class TestRival(unittest.TestCase):

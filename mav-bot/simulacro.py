@@ -21,6 +21,10 @@ El simulacro no es amable a propósito:
     plataforma de verdad ("La oferta de compra no ha sido ingresada");
   * cierra la subasta con cuenta regresiva que se reinicia en cada mejora.
 
+El mercado está congelado hasta que el bot abre la subasta: nada se mueve
+mientras te logueás y llenás el formulario. Y cuando una rueda termina, se abre
+otra sola a los pocos segundos, así probar de nuevo no obliga a reiniciar nada.
+
 Nada de esto toca la plataforma real. El servidor escucha en 127.0.0.1 y el bot
 nunca ve otra dirección.
 """
@@ -46,6 +50,10 @@ CHEQUES = ("02579750", "02579751")
 # Cuenta regresiva del cierre. En MAV son 3 minutos; acá va más corto para que
 # una demostración dure lo que dura un café y no una reunión.
 CUENTA_S = 45.0
+
+# Cuando una rueda termina, el simulacro abre otra sola. Asi probar de nuevo no
+# obliga a cortar y volver a levantar todo, y una demora tuya no arruina nada.
+PAUSA_ENTRE_RUEDAS_S = 12.0
 
 # Lo que tarda la plataforma en mostrar una oferta recién cargada. Es el detalle
 # que rompía al bot, así que el simulacro lo exagera a propósito.
@@ -76,11 +84,39 @@ class Subasta:
         self.ident = ident
         self.candado = threading.Lock()
         self.proximo_id = 2046500
-        self.ofertas: list[dict] = []
-        self.estado = "Activa"
-        self.arranque = reloj.monotonic()
-        self.cierra_s = self.arranque + CUENTA_S
         self.historia: list[str] = []
+        self.ronda = 0
+        self.reabre_s: float | None = None
+        self.abrir()
+
+    def abrir(self) -> None:
+        """Arranca una rueda nueva, congelada hasta que alguien la mire."""
+        with self.candado:
+            self.ronda += 1
+            self.estado = "Activa"
+            self.reabre_s = None
+            self.ofertas = []
+            # La cuenta regresiva NO corre todavia. Si corriera desde que
+            # levanta el servidor, la subasta se cerraria sola mientras el
+            # trader se loguea y llena el formulario — que es exactamente lo
+            # que pasaba.
+            self.mirada = False
+            self.cierra_s = float("inf")
+        # La oferta que el trader carga a mano antes de activar el bot: sin
+        # esto el bot no tiene nada que defender, y no puede entrar solo.
+        self.cargar(MI_AGENTE, Decimal("27.00"), "vos, a mano")
+        self.ofertas[0]["cargada_s"] = 0.0      # ya visible
+        self.cierra_s = float("inf")            # cargar() la habia puesto a correr
+
+    def mirar(self) -> None:
+        """Alguien abrió la subasta: recién ahí empieza a correr el reloj."""
+        if self.mirada or self.estado != "Activa":
+            return
+        with self.candado:
+            self.mirada = True
+            self.cierra_s = reloj.monotonic() + CUENTA_S
+        hablar(f"    (empieza la rueda {self.ronda}: cierra en {CUENTA_S:.0f}s "
+               f"sin mejoras)")
 
     # -- lectura -----------------------------------------------------------
 
@@ -117,16 +153,31 @@ class Subasta:
             self.historia.append(
                 f"{datetime.now():%H:%M:%S}  {quien} carga {coma(tasa)}")
 
-    def latir(self) -> None:
-        if self.estado == "Activa" and self.falta_s() <= 0:
-            with self.candado:
-                self.estado = "Negociada"
-            mejor = self.mejor()
-            quien = "nadie" if not mejor else f"el agente {mejor['agente']}"
-            tasa = "-" if not mejor else coma(mejor["tasa"])
-            self.historia.append(
-                f"{datetime.now():%H:%M:%S}  CIERRA en {tasa}, se la lleva {quien}")
-            hablar(f"\n*** subasta {self.ident} cerrada en {tasa} ({quien}) ***\n")
+    def latir(self) -> bool:
+        """Devuelve True si acaba de abrir una rueda nueva."""
+        ahora = reloj.monotonic()
+        if self.estado == "Activa":
+            if self.mirada and self.falta_s() <= 0:
+                self._cerrar(ahora)
+            return False
+        if self.reabre_s is not None and ahora >= self.reabre_s:
+            self.abrir()
+            hablar(f"\n--- rueda {self.ronda}: subasta {self.ident} de nuevo "
+                   f"activa, con tu oferta en 27,00 ---")
+            hablar("    (volvé a sumarla en la pantalla)\n")
+            return True
+        return False
+
+    def _cerrar(self, ahora: float) -> None:
+        with self.candado:
+            self.estado = "Negociada"
+            self.reabre_s = ahora + PAUSA_ENTRE_RUEDAS_S
+        mejor = self.mejor()
+        quien = "nadie" if not mejor else f"el agente {mejor['agente']}"
+        tasa = "-" if not mejor else coma(mejor["tasa"])
+        self.historia.append(
+            f"{datetime.now():%H:%M:%S}  CIERRA en {tasa}, se la lleva {quien}")
+        hablar(f"\n*** subasta {self.ident} cerrada en {tasa} ({quien}) ***\n")
 
 
 class Rival:
@@ -140,7 +191,14 @@ class Rival:
         self.cada_s = cada_s
         self.proximo_s = reloj.monotonic() + cada_s
 
+    def reiniciar(self) -> None:
+        self.proximo_s = reloj.monotonic() + self.cada_s
+
     def latir(self) -> None:
+        # Antes de que alguien mire la subasta no pasa nada: el mercado no se
+        # mueve para nadie.
+        if not self.subasta.mirada:
+            return
         if self.subasta.estado != "Activa" or reloj.monotonic() < self.proximo_s:
             return
         self.proximo_s = reloj.monotonic() + self.cada_s
@@ -225,7 +283,11 @@ def pagina_cheques(comitente="51414", cuit="30-11111111-1") -> str:
 def fila_listado(s: Subasta) -> dict:
     """Con los nombres de campo reales, los que confirmó el diagnóstico."""
     mejor = s.mejor()
-    cierre = datetime.now() + timedelta(seconds=s.falta_s())
+    # Antes de que empiece la rueda no hay cuenta corriendo, pero la pantalla
+    # igual muestra un horario de cierre previsto.
+    falta = s.falta_s()
+    cierre = datetime.now() + timedelta(
+        seconds=CUENTA_S if falta == float("inf") else falta)
     tmin = datetime.now() - timedelta(seconds=30)
     return {
         "ident": str(s.ident),
@@ -278,7 +340,8 @@ class Handler(BaseHTTPRequestHandler):
         return programa, {k: v[0] for k, v in params.items()}
 
     def _latir(self):
-        self.subasta.latir()
+        if self.subasta.latir():
+            self.rival.reiniciar()
         self.rival.latir()
 
     # -- rutas -------------------------------------------------------------
@@ -299,6 +362,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._responder(json.dumps({"work-json": filas}),
                                    "application/json")
         if programa == "cpd-versubasta.r":
+            # Abrir la subasta es lo que larga la cuenta regresiva.
+            self.subasta.mirar()
             return self._responder(pagina_subasta(self.subasta))
         if programa == "cpd-ch-subasta-i-v2.r":
             return self._responder(pagina_cheques())
@@ -354,11 +419,6 @@ def alta(s: Subasta, campos: dict) -> str:
 
 def arrancar_mav() -> Subasta:
     subasta = Subasta()
-    # La oferta que el trader carga a mano antes de activar el bot: sin esto el
-    # bot no tiene nada que defender, y no puede entrar solo.
-    subasta.cargar(MI_AGENTE, Decimal("27.00"), "vos, a mano")
-    subasta.ofertas[0]["cargada_s"] = 0.0     # ya visible
-
     Handler.subasta = subasta
     Handler.rival = Rival(subasta)
     servidor = ThreadingHTTPServer(("127.0.0.1", PUERTO), Handler)
@@ -384,6 +444,9 @@ def main() -> int:
           f"hasta {coma(Handler.rival.piso)}")
     print(f"  Cierra             {CUENTA_S:.0f}s sin que nadie mejore "
           f"(en MAV son 3 minutos)")
+    print()
+    print("  Nada se mueve hasta que el bot abra la subasta, así que tomate el")
+    print(f"  tiempo que quieras. Cerrada una rueda, a los {PAUSA_ENTRE_RUEDAS_S:.0f}s se abre otra.")
     print()
     print("  En la pantalla del bot:")
     print("    1. usuario y contraseña: cualquier cosa, no se valida")
