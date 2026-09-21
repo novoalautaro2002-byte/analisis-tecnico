@@ -1,27 +1,63 @@
-"""Tests de la conversacion con la plataforma."""
+"""Tests de la conversacion con la plataforma y del ingreso."""
 
 import unittest
 
 from motor.sesion import (
     CODIFICACION,
     ErrorDePlataforma,
+    IngresoRechazado,
+    Pendiente,
     Sesion,
     es_pantalla_de_login,
 )
 
+# La pantalla real: form a validar2.r con dos campos visibles y varios hidden.
+LOGIN = """<html><head><title>Inicio de Sesi&oacute;n</title></head><body>
+<form method="POST" name="form" action="validar2.r" autocomplete="off">
+<input type="hidden" name="destino" value="/cgi-bin/x/mvr-usuarios.r">
+<input type="hidden" name="login" value="true">
+<input type="text" name="id" size="20" value="">
+<input type="password" name="password" size="20">
+<input type="hidden" name="validarcodigo" value="true">
+<input type="hidden" name="metodo2fa" value="">
+</form></body></html>"""
 
-class TestCookie(unittest.TestCase):
+# El paso del codigo: sigue siendo la pantalla de login, sin campo password.
+CODIGO = """<html><head><title>Inicio de Sesi&oacute;n</title></head><body>
+<form method="POST" action="validar2.r">
+<input type="hidden" name="destino" value="/cgi-bin/x/mvr-usuarios.r">
+<input type="hidden" name="login" value="true">
+<input type="hidden" name="metodo2fa" value="mail">
+<input type="text" name="codigo" value="">
+</form></body></html>"""
+
+ADENTRO = ('<html><script>var myData = [];var myColumns=["Oferta"];</script>'
+           '<input type="hidden" name="ident" value="900"></html>')
+
+INHIBIDO = LOGIN.replace("<body>", "<body>Su usuario se encuentra inhibido.")
+MAL = LOGIN.replace("<body>", "<body>Usuario o contrase&ntilde;a incorrectos.")
+
+
+class SesionFalsa(Sesion):
+    """Sesion con la red reemplazada por un guion de respuestas."""
+
+    def __init__(self, guion, **kw):
+        super().__init__(**kw)
+        self.guion = list(guion)
+        self.enviados = []
+
+    def _pedir(self, pedido, en_login=False):
+        if pedido.data:
+            self.enviados.append(pedido.data.decode(CODIFICACION))
+        return self.guion.pop(0) if self.guion else ADENTRO
+
+
+class TestCookiePegada(unittest.TestCase):
     def test_acepta_el_volcado_entero_de_document_cookie(self):
-        # Se acepta todo para que el trader copie y pegue sin buscar cual es.
         s = Sesion.desde_texto(
             "_ga=GA1.2.999; mvrcookie=ABC123; mvrusername=lautaro; otra=x")
-        self.assertEqual(s.cookies["mvrcookie"], "ABC123")
-        self.assertEqual(s.cookies["mvrusername"], "lautaro")
-        self.assertNotIn("_ga", s.cookies)
-
-    def test_acepta_solo_la_cookie_de_sesion(self):
-        self.assertEqual(
-            Sesion.desde_texto("mvrcookie=ABC123").cookies, {"mvrcookie": "ABC123"})
+        self.assertIn("mvrcookie=ABC123", s.cabecera_cookie)
+        self.assertNotIn("_ga", s.cabecera_cookie)
 
     def test_sin_mvrcookie_avisa_claro(self):
         for basura in ("", "mvrusername=lautaro", "hola"):
@@ -29,22 +65,66 @@ class TestCookie(unittest.TestCase):
                 Sesion.desde_texto(basura)
             self.assertIn("mvrcookie", str(e.exception))
 
-    def test_arma_la_cabecera(self):
-        s = Sesion(cookies={"mvrcookie": "A", "mvrusername": "b"})
-        self.assertEqual(s.cabecera_cookie, "mvrcookie=A; mvrusername=b")
+
+class TestIngreso(unittest.TestCase):
+    def test_pide_el_codigo_sin_saber_como_se_llama(self):
+        # El nombre del campo sale del formulario que manda el servidor, no de
+        # una constante nuestra.
+        s = SesionFalsa([LOGIN, CODIGO])
+        pendiente = s.ingresar("lautaro", "secreta")
+        self.assertIsInstance(pendiente, Pendiente)
+        self.assertEqual(pendiente.campos, ("codigo",))
+
+    def test_manda_usuario_y_clave_con_los_hidden_intactos(self):
+        s = SesionFalsa([LOGIN, CODIGO])
+        s.ingresar("lautaro", "secreta")
+        enviado = s.enviados[0]
+        self.assertIn("id=lautaro", enviado)
+        self.assertIn("password=secreta", enviado)
+        self.assertIn("validarcodigo=true", enviado)
+        self.assertIn("login=true", enviado)
+
+    def test_completa_el_codigo_y_entra(self):
+        s = SesionFalsa([LOGIN, CODIGO, ADENTRO, ADENTRO])
+        s.ingresar("lautaro", "secreta")
+        self.assertIsNone(s.continuar({"codigo": "123456"}))
+        self.assertIn("codigo=123456", s.enviados[1])
+        # Y reenvia los hidden del paso del codigo, sin inventarlos.
+        self.assertIn("metodo2fa=mail", s.enviados[1])
+
+    def test_entra_directo_si_no_hay_segundo_paso(self):
+        s = SesionFalsa([LOGIN, ADENTRO, ADENTRO])
+        self.assertIsNone(s.ingresar("lautaro", "secreta"))
+
+    def test_continuar_sin_ingreso_previo(self):
+        with self.assertRaises(IngresoRechazado):
+            SesionFalsa([]).continuar({"codigo": "1"})
+
+
+class TestRechazos(unittest.TestCase):
+    def test_credenciales_mal(self):
+        s = SesionFalsa([LOGIN, MAL])
+        with self.assertRaises(IngresoRechazado) as e:
+            s.ingresar("lautaro", "mala")
+        self.assertIn("incorrect", str(e.exception).lower())
+
+    def test_usuario_inhibido_explica_que_hacer(self):
+        # Es el caso que deja al trader afuera en medio de la rueda: el mensaje
+        # tiene que decirle a quien recurrir.
+        s = SesionFalsa([LOGIN, INHIBIDO])
+        with self.assertRaises(IngresoRechazado) as e:
+            s.ingresar("lautaro", "secreta")
+        self.assertIn("Master", str(e.exception))
 
 
 class TestDeteccionDeLogin(unittest.TestCase):
     def test_reconoce_la_pantalla_de_login(self):
-        self.assertTrue(es_pantalla_de_login(
-            '<html><head><title>Inicio de Sesi&oacute;n</title></head>'))
+        self.assertTrue(es_pantalla_de_login(LOGIN))
         self.assertTrue(es_pantalla_de_login(
             '<form method="POST" name="form" action="validar2.r">'))
 
     def test_no_confunde_una_subasta(self):
-        self.assertFalse(es_pantalla_de_login(
-            '<html><script>var myData = [];</script>'
-            '<input type="hidden" name="ident" value="900"></html>'))
+        self.assertFalse(es_pantalla_de_login(ADENTRO))
 
     def test_solo_mira_el_principio(self):
         # La palabra puede aparecer al pie de cualquier pagina larga; el

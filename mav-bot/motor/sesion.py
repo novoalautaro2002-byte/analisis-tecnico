@@ -2,9 +2,10 @@
 
 Usa solo la biblioteca estandar: una dependencia menos para instalar.
 
-La sesion es la que el trader ya abrio a mano en su navegador. Este modulo no
-sabe usuario ni contraseña y no las pide: recibe la cookie de una sesion viva y
-la relaya. El 2FA se hace donde siempre.
+El ingreso se hace aca mismo, en la maquina del trader. La contraseña y el
+codigo viven en memoria el tiempo que dura el pedido y no se escriben en ningun
+archivo ni en el log. El 2FA no se adivina: se lee el formulario que manda el
+servidor, se completan los campos visibles y se devuelve el resto intacto.
 
 Los GET se pueden reintentar. Los POST **nunca**: un alta que no sabemos si
 entro se resuelve releyendo el libro, no mandandola de nuevo.
@@ -12,16 +13,19 @@ entro se resuelve releyendo el libro, no mandandola de nuevo.
 
 from __future__ import annotations
 
+import http.cookiejar
 import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 
-BASE = "https://trading.mav-sa.com.ar/cgi-bin/wspd_cgi.sh/WService=wsbroker1/"
+from .formulario import FormularioIlegible, parsear_form
 
-# La plataforma emite y espera ISO-8859-1. Mandar UTF-8 rompe los nombres con
-# acento y los CUIT quedan bien pero los comitentes no.
+BASE = "https://trading.mav-sa.com.ar/cgi-bin/wspd_cgi.sh/WService=wsbroker1/"
+LOGIN = "mvr-usuarios.r"
+
+# La plataforma emite y espera ISO-8859-1. Mandar UTF-8 rompe los acentos.
 CODIFICACION = "latin-1"
 
 NAVEGADOR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -29,13 +33,15 @@ NAVEGADOR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 _PANTALLA_LOGIN = re.compile(r"validar2\.r|Inicio de Sesi", re.I)
 _COOKIE = re.compile(r"(mvrcookie|mvrusername)\s*=\s*([^;,\s]+)")
+_ERROR = re.compile(
+    r"(usuario o contrase|incorrect\w*|inhibid\w*|expirad\w*|bloquead\w*)", re.I)
 
 
 class SesionCaida(Exception):
-    """La plataforma contesto la pantalla de login: la sesion vencio.
+    """La plataforma devolvio el login: la sesion vencio.
 
-    Importa que sea su propia excepcion: el bot no puede re-loguearse solo
-    (el 2FA lo impide), asi que esto siempre termina en parar y avisar.
+    Tiene excepcion propia porque siempre termina igual: parar y avisar. El bot
+    no puede re-loguearse solo sin el codigo, que le llega al trader.
     """
 
 
@@ -43,17 +49,105 @@ class ErrorDePlataforma(Exception):
     pass
 
 
+class IngresoRechazado(Exception):
+    """Credenciales mal, usuario inhibido, o codigo vencido."""
+
+
+@dataclass
+class Pendiente:
+    """Lo que el servidor pide para seguir: normalmente el codigo del 2FA."""
+
+    campos: tuple[str, ...]
+    mensaje: str
+
+
 @dataclass
 class Sesion:
-    cookies: dict[str, str] = field(default_factory=dict)
     tiempo_max_s: float = 20.0
+    jar: http.cookiejar.CookieJar = field(default_factory=http.cookiejar.CookieJar)
+    _abridor: urllib.request.OpenerDirector | None = field(default=None, repr=False)
+    _paso: object | None = field(default=None, repr=False)
+
+    def __post_init__(self):
+        if self._abridor is None:
+            self._abridor = urllib.request.build_opener(
+                urllib.request.HTTPCookieProcessor(self.jar))
+
+    # -- ingreso -----------------------------------------------------------
+
+    def ingresar(self, usuario: str, clave: str) -> Pendiente | None:
+        """Manda usuario y contraseña.
+
+        Devuelve None si ya quedo adentro, o un Pendiente con los campos que
+        falta completar — el codigo del 2FA, con el nombre que le ponga el
+        servidor.
+        """
+        html = self._pedir(urllib.request.Request(BASE + LOGIN), en_login=True)
+        form = parsear_form(html, con_campo="password")
+        campos = dict(form.campos)
+        campos["id"] = usuario
+        campos["password"] = clave
+        return self._enviar_form(form.action or LOGIN, campos)
+
+    def continuar(self, valores: dict[str, str]) -> Pendiente | None:
+        """Completa lo que pidio el paso anterior, tipicamente el codigo."""
+        if self._paso is None:
+            raise IngresoRechazado("no hay ningun ingreso a medio hacer")
+        accion, campos = self._paso
+        campos = dict(campos)
+        campos.update(valores)
+        return self._enviar_form(accion, campos)
+
+    def _enviar_form(self, accion: str, campos: dict[str, str]) -> Pendiente | None:
+        html = self._postear_crudo(accion, campos.items(), en_login=True)
+
+        if not es_pantalla_de_login(html) and self.adentro():
+            self._paso = None
+            return None
+
+        error = _texto_de_error(_ERROR.search(html))
+
+        # Si vuelve a pedir la contraseña, no es un paso siguiente: es un
+        # rechazo. El formulario del codigo no trae campo password.
+        try:
+            parsear_form(html, con_campo="password")
+        except FormularioIlegible:
+            pass
+        else:
+            self._paso = None
+            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
+
+        try:
+            form = parsear_form(html)
+        except FormularioIlegible:
+            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
+
+        # Campos visibles que todavia no tienen valor: eso es lo que falta.
+        faltan = tuple(c for c in form.visibles
+                       if not (form.campos.get(c) or "").strip())
+        if not faltan:
+            raise IngresoRechazado(error or "la plataforma no acepto el ingreso")
+
+        self._paso = (form.action or accion, dict(form.campos))
+        return Pendiente(campos=faltan, mensaje=error or "Falta completar el código.")
+
+    def adentro(self) -> bool:
+        """Confirma contra una pantalla real, no contra la respuesta del login."""
+        try:
+            self.get("cpd-subastas-listado.r")
+            return True
+        except (SesionCaida, ErrorDePlataforma):
+            return False
+
+    # -- sesion ya abierta en otro lado ------------------------------------
 
     @classmethod
     def desde_texto(cls, texto: str) -> "Sesion":
-        """Arma la sesion desde lo que devuelve `document.cookie`.
+        """Arma la sesion desde una cookie copiada del navegador.
 
-        Se acepta el volcado entero para que el trader copie y pegue sin tener
-        que buscar cual de todas es.
+        Sigue existiendo para cuando el trader ya tiene la sesion abierta y
+        prefiere no volver a ingresar. Acepta el volcado entero de
+        `document.cookie` para no tener que buscar cual es.
         """
         encontradas = dict(_COOKIE.findall(texto or ""))
         if "mvrcookie" not in encontradas:
@@ -61,11 +155,17 @@ class Sesion:
                 "no encuentro 'mvrcookie' en lo que pegaste; "
                 "copia la salida de document.cookie con la sesion abierta"
             )
-        return cls(cookies=encontradas)
+        s = cls()
+        dominio = urllib.parse.urlparse(BASE).hostname
+        for nombre, valor in encontradas.items():
+            s.jar.set_cookie(http.cookiejar.Cookie(
+                0, nombre, valor, None, False, dominio, True, False,
+                "/", True, True, None, False, None, None, {}))
+        return s
 
     @property
     def cabecera_cookie(self) -> str:
-        return "; ".join(f"{k}={v}" for k, v in self.cookies.items())
+        return "; ".join(f"{c.name}={c.value}" for c in self.jar)
 
     # -- lecturas ----------------------------------------------------------
 
@@ -85,6 +185,12 @@ class Sesion:
 
     def postear(self, programa: str, pares, referer_ident: int | None = None) -> str:
         """El POST de la oferta. Sin reintentos, por diseño."""
+        return self._postear_crudo(programa, pares, referer_ident=referer_ident)
+
+    # -- plomeria ----------------------------------------------------------
+
+    def _postear_crudo(self, programa: str, pares, referer_ident: int | None = None,
+                       en_login: bool = False) -> str:
         cuerpo = urllib.parse.urlencode(list(pares), encoding=CODIFICACION,
                                         errors="replace").encode(CODIFICACION)
         # El form de la pantalla no tiene atributo action: postea contra su
@@ -97,16 +203,13 @@ class Sesion:
             headers={"Content-Type": "application/x-www-form-urlencoded",
                      "Referer": destino},
         )
-        return self._pedir(pedido)
+        return self._pedir(pedido, en_login=en_login)
 
-    # -- plomeria ----------------------------------------------------------
-
-    def _pedir(self, pedido: urllib.request.Request) -> str:
-        pedido.add_header("Cookie", self.cabecera_cookie)
+    def _pedir(self, pedido: urllib.request.Request, en_login: bool = False) -> str:
         pedido.add_header("User-Agent", NAVEGADOR)
         pedido.add_header("Accept-Language", "es-AR,es;q=0.9")
         try:
-            with urllib.request.urlopen(pedido, timeout=self.tiempo_max_s) as r:
+            with self._abridor.open(pedido, timeout=self.tiempo_max_s) as r:
                 crudo = r.read()
         except urllib.error.HTTPError as e:
             raise ErrorDePlataforma(f"HTTP {e.code} en {pedido.full_url}") from e
@@ -114,9 +217,24 @@ class Sesion:
             raise ErrorDePlataforma(f"no llegue a la plataforma: {e.reason}") from e
 
         html = crudo.decode(CODIFICACION, errors="replace")
-        if es_pantalla_de_login(html):
+        # Durante el ingreso la pantalla de login es la respuesta esperada.
+        if not en_login and es_pantalla_de_login(html):
             raise SesionCaida("la plataforma devolvio el login: la sesion vencio")
         return html
+
+
+def _texto_de_error(m) -> str | None:
+    if not m:
+        return None
+    pista = m.group(1).lower()
+    if "inhibid" in pista:
+        return ("El usuario quedó inhibido. Lo tiene que destrabar un usuario "
+                "Master de tu oficina.")
+    if "expirad" in pista:
+        return "El código expiró. Pedí uno nuevo."
+    if "bloquead" in pista:
+        return "El usuario está bloqueado."
+    return "Usuario, contraseña o código incorrectos."
 
 
 def es_pantalla_de_login(html: str) -> bool:

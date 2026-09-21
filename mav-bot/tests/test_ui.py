@@ -78,7 +78,7 @@ class TestArrancar(unittest.TestCase):
         self.t._arrancar(dict(BUENA))
         self.assertFalse(self.t.estado["corriendo"])
         self.assertIsNone(self.t.ciclo)
-        self.assertIn("cookie", self.t.estado["aviso"])
+        self.assertIn("ingres", self.t.estado["aviso"])
 
     def test_parar_activa_el_kill_switch(self):
         self.t._arrancar(dict(BUENA))

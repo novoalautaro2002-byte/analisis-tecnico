@@ -164,3 +164,42 @@ def armar_baja(html_subasta: str, id_oferta: int) -> Payload:
     campos["action"] = BAJA_COMPRA
     campos["id"] = str(id_oferta)
     return Payload(campos)
+
+
+@dataclass(frozen=True)
+class Form:
+    """Un <form> leido tal cual, para poder devolverlo completo.
+
+    Se usa en el login: no sabemos de antemano como se llama el campo del
+    codigo 2FA, asi que en vez de adivinarlo se lee el formulario que manda el
+    servidor, se completan los campos visibles y se reenvia lo demas intacto.
+    Es la misma regla de siempre: copiar, no escribir.
+    """
+
+    action: str
+    campos: dict[str, str]
+    visibles: tuple[str, ...]
+
+
+_FORM = re.compile(r"<form\b([^>]*)>(.*?)</form>", re.I | re.S)
+
+
+def parsear_form(html: str, con_campo: str | None = None) -> Form:
+    """El primer <form> del HTML, o el primero que tenga `con_campo`."""
+    for m in _FORM.finditer(html):
+        attrs = _atributos(m.group(1))
+        cuerpo = m.group(2)
+        campos = parsear_campos(cuerpo)
+        if con_campo and con_campo not in campos:
+            continue
+        visibles = []
+        for i in _INPUT.finditer(cuerpo):
+            a = _atributos(i.group(1))
+            nombre = a.get("name")
+            tipo = (a.get("type") or "text").lower()
+            if nombre and tipo in ("text", "password", "tel", "number"):
+                visibles.append(nombre)
+        return Form(action=attrs.get("action", ""), campos=campos,
+                    visibles=tuple(visibles))
+    raise FormularioIlegible(
+        f"no encontre un formulario{' con ' + con_campo if con_campo else ''}")

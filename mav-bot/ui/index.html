@@ -96,18 +96,28 @@
 
   <div class="panel">
     <h2>Sesión</h2>
-    <div class="fila">
-      <div class="campo" style="flex:1 1 420px">
-        <label for="cookie">Cookie de tu sesión abierta</label>
-        <input id="cookie" placeholder="mvrcookie=...; mvrusername=...">
+    <div class="fila" id="paso-login">
+      <div class="campo chico">
+        <label for="usuario">Usuario</label>
+        <input id="usuario" autocomplete="off">
       </div>
-      <button id="btn-sesion" class="neutro">Conectar</button>
+      <div class="campo chico">
+        <label for="clave">Contraseña</label>
+        <input id="clave" type="password" autocomplete="off">
+      </div>
+      <button id="btn-ingresar">Ingresar</button>
+    </div>
+    <div class="fila" id="paso-codigo" hidden style="margin-top:10px">
+      <div class="campo chico">
+        <label for="codigo">Código</label>
+        <input id="codigo" inputmode="numeric" autocomplete="off">
+      </div>
+      <button id="btn-codigo">Confirmar</button>
     </div>
     <p class="nota">
-      En el Chrome donde ya estás logueado en MAV: <b>F12</b> → pestaña
-      <b>Console</b> → escribí <code style="font-family:ui-monospace,Consolas,monospace;background:var(--fondo);padding:1px 5px;border-radius:4px">document.cookie</code> → Enter → copiá lo
-      que salga y pegalo acá. Dura todo el día, igual que tu sesión.
-      No se guarda en ningún archivo y no sale de tu máquina.
+      El mismo ingreso de siempre, con su código. La contraseña y el código no
+      se guardan en ningún archivo ni quedan en el log: se usan y se van.
+      La sesión dura lo que dure en la plataforma.
     </p>
   </div>
 
@@ -191,6 +201,7 @@
 <script>
 const $ = id => document.getElementById(id);
 let corriendo = false;
+let campoPendiente = null;
 
 async function pedir(ruta, cuerpo) {
   const r = await fetch(ruta, {
@@ -216,10 +227,19 @@ function parametros(vivo) {
   };
 }
 
-$('btn-sesion').onclick = () => {
-  const cookie = $('cookie').value.trim();
-  if (!cookie) { alert('Pegá la cookie primero.'); return; }
-  pedir('/api/sesion', {cookie});
+$('btn-ingresar').onclick = () => {
+  const usuario = $('usuario').value.trim();
+  const clave = $('clave').value;
+  if (!usuario || !clave) { alert('Falta usuario o contraseña.'); return; }
+  pedir('/api/ingresar', {usuario, clave});
+  $('clave').value = '';
+};
+
+$('btn-codigo').onclick = () => {
+  const codigo = $('codigo').value.trim();
+  if (!codigo || !campoPendiente) return;
+  pedir('/api/codigo', {valores: {[campoPendiente]: codigo}});
+  $('codigo').value = '';
 };
 
 $('btn-detalle').onclick = () => {
@@ -306,8 +326,13 @@ async function refrescar() {
   catch { $('chip-sesion').textContent = 'Interfaz caída'; return; }
 
   const ses = $('chip-sesion');
-  ses.textContent = 'Sesión: ' + (e.sesion ? 'conectada' : 'sin conectar');
+  ses.textContent = 'Sesión: ' + (e.sesion ? 'iniciada' : 'sin iniciar');
   ses.className = 'chip ' + (e.sesion ? 'ok' : 'mal');
+
+  campoPendiente = (e.pendiente && e.pendiente.length) ? e.pendiente[0] : null;
+  $('paso-codigo').hidden = !campoPendiente;
+  $('paso-login').hidden = e.sesion;
+  if (campoPendiente) $('codigo').focus();
 
   corriendo = e.corriendo;
   const modo = $('chip-modo');

@@ -6,8 +6,10 @@
 Levanta un servidor en tu maquina y abre el navegador. Solo biblioteca estandar:
 no hay nada que instalar.
 
-No maneja ningun navegador. Le habla directo a la plataforma con la cookie de la
-sesion que vos ya abriste a mano, y nunca pide usuario ni contraseña.
+No maneja ningun navegador: le habla directo a la plataforma. El ingreso se hace
+en esta misma pantalla, con el 2FA de siempre. La contraseña y el codigo viven
+en memoria el tiempo que dura el pedido y no se escriben en ningun archivo ni en
+el log.
 
 El servidor escucha solo en 127.0.0.1: desde esta pantalla se lanzan ordenes
 reales, no tiene por que llegarle nadie de afuera.
@@ -29,7 +31,12 @@ from motor.config import ConfigInvalida, ConfigSubasta
 from motor.formulario import CampoProhibido, FormularioIlegible
 from motor.libro import LibroIlegible, formatear_tasa, parsear_libro, parsear_tasa
 from motor.registro import Registro
-from motor.sesion import ErrorDePlataforma, Sesion, SesionCaida
+from motor.sesion import (
+    ErrorDePlataforma,
+    IngresoRechazado,
+    Sesion,
+    SesionCaida,
+)
 
 AQUI = Path(__file__).parent
 PUERTO = 8733
@@ -51,6 +58,7 @@ class Trabajador(threading.Thread):
         self.eco = True          # los tests lo apagan
         self.estado = {
             "sesion": False,
+            "pendiente": [],
             "corriendo": False,
             "modo": None,
             "subasta": None,
@@ -98,7 +106,11 @@ class Trabajador(threading.Thread):
             except queue.Empty:
                 return
             try:
-                if orden == "sesion":
+                if orden == "ingresar":
+                    self._ingresar(datos.get("usuario", ""), datos.get("clave", ""))
+                elif orden == "codigo":
+                    self._codigo(datos.get("valores") or {})
+                elif orden == "sesion":
                     self._conectar(datos.get("cookie", ""))
                 elif orden == "detalle":
                     self._detalle(int(datos.get("ident") or 0))
@@ -107,10 +119,35 @@ class Trabajador(threading.Thread):
                 elif orden == "parar":
                     self._frenar("parado a mano")
             except (ConfigInvalida, LibroIlegible, ErrorDePlataforma, SesionCaida,
-                    FormularioIlegible, CampoProhibido) as e:
+                    FormularioIlegible, CampoProhibido, IngresoRechazado) as e:
                 self._set(aviso=str(e))
             except Exception as e:
                 self._set(aviso=f"error: {e}")
+
+    def _ingresar(self, usuario: str, clave: str) -> None:
+        """Usuario y contraseña.
+
+        Ni la clave ni el codigo entran nunca al estado ni al log: viven en la
+        llamada y se van con ella.
+        """
+        sesion = Sesion()
+        pendiente = sesion.ingresar(usuario, clave)
+        self.sesion = sesion
+        if pendiente is None:
+            self._set(sesion=True, pendiente=[], aviso="Sesión iniciada.")
+        else:
+            self._set(sesion=False, pendiente=list(pendiente.campos),
+                      aviso=pendiente.mensaje)
+
+    def _codigo(self, valores: dict) -> None:
+        if self.sesion is None:
+            self._set(aviso="Primero ingresá usuario y contraseña.")
+            return
+        pendiente = self.sesion.continuar({k: str(v) for k, v in valores.items()})
+        if pendiente is None:
+            self._set(sesion=True, pendiente=[], aviso="Sesión iniciada.")
+        else:
+            self._set(pendiente=list(pendiente.campos), aviso=pendiente.mensaje)
 
     def _conectar(self, texto: str) -> None:
         sesion = Sesion.desde_texto(texto)
@@ -122,14 +159,14 @@ class Trabajador(threading.Thread):
 
     def _detalle(self, ident: int) -> None:
         if self.sesion is None:
-            self._set(aviso="Primero pegá la cookie de sesión.")
+            self._set(aviso="Primero ingresá a la plataforma.")
             return
         libro = parsear_libro(self.sesion.subasta(ident))
         self._set(subasta=ident, libro=self._libro_json(libro), aviso=None)
 
     def _arrancar(self, datos: dict) -> None:
         if self.sesion is None:
-            self._set(aviso="Primero pegá la cookie de sesión.")
+            self._set(aviso="Primero ingresá a la plataforma.")
             return
         cfg = ConfigSubasta(
             ident=int(datos["ident"]),
@@ -225,7 +262,8 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return self._json({"error": "json invalido"}, 400)
 
-        rutas = {"/api/sesion": "sesion", "/api/detalle": "detalle",
+        rutas = {"/api/ingresar": "ingresar", "/api/codigo": "codigo",
+                 "/api/sesion": "sesion", "/api/detalle": "detalle",
                  "/api/arrancar": "arrancar", "/api/parar": "parar"}
         orden = rutas.get(self.path)
         if orden is None:
