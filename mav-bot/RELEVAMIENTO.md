@@ -95,11 +95,106 @@ programa directamente por URL, o guardar el marco.
 `cpd-cambio-comit.r`, `cpd-totales.r`, `cpd-instrumentos-comprados.r`,
 `cpd-instrumentos-vendidos.r`, `cpd-concertacion.r`, `cpd-registro-operaciones.r`
 
-Las dos que más importan para el bot: **`cpd-versubasta.r?ident=<n>`** (las puntas
-de una subasta) y **`cpd-ofertas.r?estado=Activas`** (mis ofertas vivas, que es el
-camino de reconciliación). Ninguna tiene controller JS bajo `/controllers/`, así
-que probablemente sigan siendo HTML renderizado en el servidor — falta
-confirmarlo con una captura.
+## `cpd-versubasta.r?ident=<n>` — la pantalla del bot
+
+HTML renderizado en el servidor, sin controller JS. jQuery 1.9.1 y la grilla
+Active Widgets (`/runtimex/lib/aw.js`).
+
+### El libro viene en un array de JavaScript
+
+No hay que raspar celdas de una tabla: las ofertas están en un array embebido,
+que Active Widgets después dibuja.
+
+```js
+var myData = [
+[ " 2046207","442", "10,00", "10:51:52", "<a href='#' onClick='bajaOferta(2046207)'>[X]</a>"]
+];
+var myColumns = [ "Oferta", "Ag.", "Desc.", "Ingreso", "Baja" ];
+```
+
+| Columna | Qué es |
+|---|---|
+| `Oferta` | ID de la oferta. Viene con un espacio adelante. |
+| `Ag.` | Número de agente |
+| `Desc.` | La tasa, con **coma** decimal |
+| `Ingreso` | Hora `hh:mm:ss` |
+| `Baja` | Link `[X]` con `bajaOferta(<id>)` |
+
+**La columna `Baja` es el identificador de propiedad.** El link aparece solo en
+las ofertas que uno puede dar de baja, o sea las propias. Es más fuerte que
+comparar el número de agente, que es del ALyC y lo comparten todos los operadores
+de la mesa.
+
+### Alta, modificación y baja son un solo POST
+
+No hay flujo de varias pantallas ni pantalla de preview. Un `<form method="post">`
+sin `action`, o sea que postea contra la misma URL, con estos campos:
+
+| Campo | Contenido |
+|---|---|
+| `action` | `altaCompra`, `bajaCompra`, `altaVenta`, `bajaVenta` |
+| `id` | ID de la oferta, solo en las bajas |
+| `ident` | Número de subasta |
+| `tasa` | La tasa, con coma decimal |
+| `comitcpr<idCheque>` | Comitente comprador, uno por cheque |
+| `cuitcpr<idCheque>` | CUIT del comitente |
+| `excepcpr<idCheque>` | `No` por defecto |
+| `condcpr<idCheque>` | Condición |
+
+El botón dice **"Modificar Tasa Cpr."** y llama a `ofertaCompra()`, que valida y
+hace `action.value="altaCompra"` + `submit()`. O sea que **re-cotizar es el mismo
+POST que dar de alta**: no hay un flujo aparte de modificación, y no existe la
+ventana de quedarse sin punta en el libro.
+
+La baja es todavía más directa:
+
+```js
+function bajaOferta(ident){
+   if(confirm("Confirma baja de Oferta de Compra?")){
+      document.forms[0].action.value="bajaCompra";
+      document.forms[0].id.value=ident;
+      document.forms[0].submit();
+   }
+}
+```
+
+### Consecuencias para el diseño
+
+- **El staging del brief original no hace falta.** Se planteó para adelantar los
+  round-trips de un flujo de varias pantallas; acá hay uno solo.
+- **No hay preview contra el cual verificar.** Era el control de riesgo más
+  valioso del plan y no existe. Hay que reemplazarlo por: validar el payload
+  construido antes de postear, releer el libro inmediatamente antes, y verificar
+  después releyendo `myData`.
+- El cartel de confirmación es un `window.confirm()` del navegador. Un POST
+  armado por el bot no lo dispara.
+
+### Validaciones del cliente, a replicar
+
+- La tasa usa **coma** decimal. Con punto, el JS rechaza antes de postear.
+- Tasa negativa solo en `PAGARE` y `FCE`.
+- Comitente comprador obligatorio, numérico, distinto de cero y no negativo.
+- CUIT del comitente obligatorio.
+
+Todo eso es validación de cliente: el bot arma el POST directo, así que tiene que
+replicarlas él mismo o va a mandar cosas que el servidor puede aceptar mal.
+
+### `La oferta de compra no ha sido ingresada`
+
+Es el `else` del `window.confirm()` de `ofertaCompra()`, no un rechazo del
+servidor. Si aparece, es que se canceló el cartel: no se mandó nada.
+
+### iframes anidados
+
+Dentro de la pantalla hay dos más:
+
+- `cpd-ch-subasta-i-v2.r?ident=<n>` (name `fcheques`) — los cheques del lote y los
+  campos de comitente. `ofertaCompra()` copia los valores desde ahí al form
+  principal con `window.frames.fcheques.document.forms.formul`.
+- `cpd-of-compra-i.r?ident=<n>` (name `fofertasc`) — ofertas de compra.
+
+O sea que la captura tiene que bajar frames anidados, no solo los cinco del
+frameset de primer nivel.
 
 ## Login
 
@@ -125,11 +220,13 @@ confirmarlo con una captura.
 ## Pendiente
 
 - [ ] Respuesta real de `cpd-subastas-api.p` para mapear los campos del JSON
-- [ ] `cpd-versubasta.r?ident=<n>`: cómo se ven las puntas, el número de agente y
-      la hora hh:mm:ss de cada una
-- [ ] Si esa pantalla tiene su propio endpoint JSON o es HTML
-- [ ] Flujo de modificar oferta y su preview
+- [ ] `cpd-ch-subasta-i-v2.r?ident=<n>`: el form `formul` con los campos de
+      comitente por cheque, que es de donde sale la mitad del payload
+- [ ] Cómo se ve la pantalla **después** de un alta: qué devuelve el POST y cómo
+      se confirma que la oferta entró
+- [ ] Cómo se ve un rechazo del servidor (distinto del `confirm()` cancelado)
 - [ ] `cpd-ofertas.r?estado=Activas` para la reconciliación
-- [ ] Cómo se ve un rechazo
 - [ ] Si la pantalla de subasta se auto-refresca y cada cuánto
+- [ ] Un `myData` con varias ofertas de agentes distintos, para ver el orden y
+      confirmar que `Baja` solo aparece en las propias
 - [ ] Si la plataforma admite dos sesiones simultáneas del mismo usuario
