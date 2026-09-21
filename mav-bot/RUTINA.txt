@@ -24,6 +24,27 @@ estar logueados al mismo tiempo. Por eso el orden es este y no otro.
 7.  Dejas la ventana negra abierta y miras.
 
 
+EL BOT TE AVISA
+---------------
+No tenes que mirar la pantalla. Suena y te avisa arriba de todo cuando
+pasa algo que te necesita:
+
+  SE FRENO           algo no cierra y paro. Es lo unico urgente: suena
+                     tres veces.
+  CEDIO EN EL PISO   llego a tu piso y no sigue.
+  CERRO              la subasta se ejecuto.
+  SE CAYO LA SESION  hay que volver a ingresar a mano.
+
+NO suena cuando cotiza. Eso es su trabajo, no una noticia. Si sonara en
+cada recotizacion lo dejarias de mirar, que es el mismo problema.
+
+El casillero "avisarme" arriba a la derecha lo apaga si molesta.
+
+Igual no te vayas lejos: si se cae la sesion el bot no puede volver a
+entrar solo (el 2FA lo pones vos) y te quedan ordenes vivas en el libro
+que no puede modificar.
+
+
 PARA CORTAR
 -----------
   Boton PARAR TODO       frena las cotizaciones nuevas
