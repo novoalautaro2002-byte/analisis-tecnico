@@ -28,6 +28,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from motor.config import ConfigInvalida, ConfigSubasta
+from motor.ficha import leer_ficha
 from motor.formulario import CampoProhibido, FormularioIlegible, parsear_campos
 from motor.libro import LibroIlegible, formatear_tasa, parsear_libro, parsear_tasa
 from motor.mesa import Mesa
@@ -186,11 +187,15 @@ class Trabajador(threading.Thread):
         libro = parsear_libro(sesion.subasta(ident), self._exige_agente())
         mia = libro.mejor_propia()
         ajena = libro.mejor_ajena()
-        ficha = sesion.estado_subasta(ident) or {}
+        ficha = leer_ficha(sesion.estado_subasta(ident) or {})
         self._set(mirado={
             "ident": ident,
-            "estado": str(ficha.get("estado") or "").strip() or None,
-            "segmento": str(ficha.get("segmento") or "").strip() or None,
+            "estado": (ficha.estado or None) if ficha else None,
+            "segmento": (ficha.segmento or None) if ficha else None,
+            "tmin": (ficha.tiempo_minimo or None) if ficha else None,
+            "cierre": (ficha.hora_cierre or None) if ficha else None,
+            "cheques": ficha.cantidad_cheques if ficha else None,
+            "agente_vdr": (ficha.agente_vdr or None) if ficha else None,
             "mia": formatear_tasa(mia.tasa) if mia else None,
             "mejor_ajena": formatear_tasa(ajena.tasa) if ajena else None,
             "gano": bool(mia and (not ajena or mia.tasa < ajena.tasa)),

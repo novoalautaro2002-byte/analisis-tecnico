@@ -81,6 +81,7 @@
   .detalle{font-size:12px;color:var(--suave);min-height:32px}
   .sub footer{display:flex;justify-content:space-between;align-items:center;
               margin-top:9px;font-size:11px;color:var(--tenue)}
+  .sub footer .reloj{font-variant-numeric:tabular-nums;white-space:nowrap}
 </style>
 </head>
 <body>
@@ -271,6 +272,12 @@ function pintarMirado(m) {
         activa?'var(--ok)':'var(--suave)'}">${esc(m.estado)}</div></div>`:''}
       ${m.segmento?`<div><div class="k">Segmento</div>
         <div class="v" style="font-size:15px">${esc(m.segmento)}</div></div>`:''}
+      ${m.tmin?`<div><div class="k">T. mínimo</div>
+        <div class="v" style="font-size:15px">${esc(m.tmin)}</div></div>`:''}
+      ${m.cierre?`<div><div class="k">Cierre</div>
+        <div class="v" style="font-size:15px">${esc(m.cierre)}</div></div>`:''}
+      ${m.cheques?`<div><div class="k">Cheques</div>
+        <div class="v" style="font-size:15px">${m.cheques}</div></div>`:''}
     </div>${tablaOfertas(m.ofertas)}
     ${activa?'':`<p class="nota">La subasta está ${esc(m.estado.toLowerCase())}.
       El bot solo opera en subastas activas.</p>`}`;
@@ -278,6 +285,10 @@ function pintarMirado(m) {
 
 function tarjeta(s) {
   const falta = s.falta_s > 0.4 ? ` · mueve en ${s.falta_s.toFixed(0)}s` : '';
+  // T.Min es la hora desde la cual corren los 3 minutos, y el cierre se corre
+  // con cada mejora: mirarlos juntos dice cuánto aire queda de verdad.
+  const reloj = [s.tmin?`T.Min ${esc(s.tmin)}`:'', s.cierre?`cierra ${esc(s.cierre)}`:'']
+    .filter(Boolean).join(' · ');
   return `<div class="sub ${s.fase}">
     <header>
       <b>${s.ident}</b>
@@ -294,7 +305,8 @@ function tarjeta(s) {
     </div>
     <div class="detalle">${esc(s.detalle)}</div>
     ${tablaOfertas(s.ofertas)}
-    <footer><span>${s.recotizaciones} movimiento(s)${falta}</span></footer>
+    <footer><span>${s.recotizaciones} movimiento(s)${falta}</span>${
+      reloj?`<span class="reloj">${reloj}</span>`:''}</footer>
   </div>`;
 }
 

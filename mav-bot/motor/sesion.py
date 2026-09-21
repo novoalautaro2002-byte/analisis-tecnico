@@ -34,6 +34,14 @@ CODIFICACION = "latin-1"
 NAVEGADOR = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
              "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
+# El listado pide todos sus filtros aunque vayan vacios: si falta uno, Progress
+# contesta con error en vez de ignorarlo.
+_FILTROS_VACIOS = {
+    "p-estado": "Todas", "p-subasta": "", "p-segmento": "", "p-instrumento": "",
+    "p-moneda": "", "p-sgr": "", "p-plazo": "", "p-cuit": "", "p-ident": "",
+    "p-montoDesde": "", "p-montoHasta": "", "p-ppvdesde": "", "p-ppvhasta": "",
+}
+
 _PANTALLA_LOGIN = re.compile(r"validar2\.r|Inicio de Sesi", re.I)
 _COOKIE = re.compile(r"(mvrcookie|mvrusername)\s*=\s*([^;,\s]+)")
 
@@ -275,30 +283,42 @@ class Sesion:
         Sirve para ver que campos trae de verdad: el JavaScript de MAV lee solo
         algunos, asi que desde afuera no se sabe que mas hay adentro.
         """
-        base = {"p-estado": "Todas", "p-subasta": "", "p-segmento": "",
-                "p-instrumento": "", "p-moneda": "", "p-sgr": "", "p-plazo": "",
-                "p-cuit": "", "p-ident": "", "p-montoDesde": "",
-                "p-montoHasta": "", "p-ppvdesde": "", "p-ppvhasta": ""}
+        base = dict(_FILTROS_VACIOS)
         base.update(filtros)
         return self.get("cpd-subastas-api.p", **base)
 
-    def estado_subasta(self, ident: int) -> dict | None:
-        """Ficha de la subasta, del endpoint JSON del listado.
+    def _filas_listado(self, **filtros) -> list[dict]:
+        crudo = self.listado_crudo(**filtros)
+        try:
+            filas = json.loads(crudo).get("work-json") or []
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            return []
+        return [f for f in filas if isinstance(f, dict)]
 
-        Sirve para saber si sigue activa. Es informativo: si falla, se sigue
-        sin el dato en vez de romper la pantalla del libro.
+    def tablero(self) -> dict[int, dict]:
+        """El listado entero, indexado por numero de subasta.
+
+        Un solo pedido alcanza para saber el estado y la mejor tasa compradora
+        de todas las subastas que el bot esta cuidando. Los errores suben: el
+        que llama decide si se aguanta sin tablero o si frena.
+        """
+        tablero: dict[int, dict] = {}
+        for fila in self._filas_listado():
+            crudo = str(fila.get("ident", "")).strip()
+            if crudo.isdigit():
+                tablero[int(crudo)] = fila
+        return tablero
+
+    def estado_subasta(self, ident: int) -> dict | None:
+        """Ficha de una sola subasta, del endpoint JSON del listado.
+
+        Es el camino de respaldo para cuando el tablero no esta disponible. Es
+        informativo: si falla, se sigue sin el dato en vez de romper la
+        pantalla del libro.
         """
         try:
-            crudo = self.get("cpd-subastas-api.p", **{
-                "p-ident": ident, "p-estado": "Todas",
-                "p-subasta": "", "p-segmento": "", "p-instrumento": "",
-                "p-moneda": "", "p-sgr": "", "p-plazo": "", "p-cuit": "",
-                "p-montoDesde": "", "p-montoHasta": "",
-                "p-ppvdesde": "", "p-ppvhasta": "",
-            })
-            filas = json.loads(crudo).get("work-json") or []
-        except (ErrorDePlataforma, SesionCaida, json.JSONDecodeError,
-                AttributeError, TypeError):
+            filas = self._filas_listado(**{"p-ident": ident})
+        except (ErrorDePlataforma, SesionCaida):
             return None
         for fila in filas:
             if str(fila.get("ident", "")).strip() == str(ident):

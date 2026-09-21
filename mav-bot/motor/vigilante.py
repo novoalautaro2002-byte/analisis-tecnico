@@ -12,32 +12,45 @@ en paralelo sobre una sola sesión.
 La otra corrección de fondo: se distingue lo pasajero de lo fatal. Un timeout de
 red no frena el bot — se reintenta con backoff. Solo frenan las cosas que
 significan que no entendemos el estado del mundo.
+
+El ritmo lo manda la orden, no el vigilante: lo único que decide cada cuánto se
+mira es el `sondeo_s` que se configuró al activar. No hay nada acá que acelere
+ni afloje solo según cómo venga la puja.
+
+Lo que sí hay es una forma de no gastar pedidos al pedo: el tablero (la fila del
+listado, ver `ficha.py`) dice si la punta compradora se movió. Cuando no se
+movió y la última lectura concluyó algo que no depende del azar, se saltea la
+relectura del libro. Es plomería, no criterio: la oferta la sigue decidiendo el
+libro, y el atajo se apaga solo si alguna vez el tablero no coincide con él.
 """
 
 from __future__ import annotations
 
 import random
-import time as reloj
 from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
 
 from .config import ConfigSubasta
 from .decision import Accion, decidir
+from .ficha import Ficha, leer_ficha
 from .formulario import CampoProhibido, FormularioIlegible, armar_oferta
 from .libro import Libro, LibroIlegible, formatear_tasa, parsear_libro
 from .riesgo import EstadoSesion, evaluar, verificar_despues
 from .sesion import ErrorDePlataforma, Sesion, SesionCaida
 
 # Cada cuánto se vuelve a preguntar el estado de la subasta (activa, negociada,
-# desierta). Es un request extra, así que no va en cada vuelta.
+# desierta) cuando el tablero de la mesa no lo esta trayendo. Es un request
+# extra, así que no va en cada vuelta.
 CADA_ESTADO_S = 45.0
+
+# Tope de confianza en el tablero. Aunque el radar jure que nada se movio, el
+# libro se relee cada tanto: un radar congelado no puede dejar ciego al bot.
+RELECTURA_S = 15.0
 
 # Fallas de red seguidas antes de darse por vencido. Con backoff, esto da
 # alrededor de un minuto de insistencia antes de frenar.
 FALLAS_TOLERADAS = 6
-
-ESTADOS_VIVOS = ("activa", "activas")
 
 
 class Fase(Enum):
@@ -68,6 +81,10 @@ class Vista:
     segmento: str | None = None
     ofertas: list = field(default_factory=list)
     falta_s: float = 0.0
+    tmin: str | None = None       # T.Min: desde ahi corren los 3 minutos
+    cierre: str | None = None     # cierre previsto; se corre con cada mejora
+    cheques: int | None = None
+    agente_vdr: str | None = None
 
 
 class Vigilante:
@@ -94,8 +111,15 @@ class Vigilante:
         self.tasa_pendiente: Decimal | None = None
         self.visto_estado_s = 0.0
         self.fallas = 0
-        self.ultimo_cambio_s = 0.0
         self.huella = None
+
+        # Radar: la fila del listado. Dice si el libro pudo haber cambiado sin
+        # gastar un pedido por subasta. Nunca decide una oferta.
+        self.ficha: Ficha | None = None
+        self.radar_confiable = True
+        self._huella_leida = None     # la huella que tenia el radar al leer
+        self._leido_s = 0.0
+        self._estable = False
 
     # -- control -----------------------------------------------------------
 
@@ -109,6 +133,20 @@ class Vigilante:
 
     def listo_para(self, ahora_s: float) -> bool:
         return ahora_s >= self.proxima_s
+
+    def recibir_ficha(self, fila: dict, ahora_s: float) -> None:
+        """La mesa reparte lo que trajo el tablero. Un pedido para todas."""
+        if self.terminado:
+            return
+        ficha = leer_ficha(fila)
+        if ficha is None or ficha.ident != self.cfg.ident:
+            return
+        self.ficha = ficha
+        self.visto_estado_s = ahora_s
+        self.estado_subasta = ficha.estado
+        self.segmento = ficha.segmento
+        if ficha.estado and not ficha.viva:
+            self._fase(Fase.CERRADA, f"la subasta está {ficha.estado.lower()}")
 
     # -- una vuelta --------------------------------------------------------
 
@@ -150,8 +188,17 @@ class Vigilante:
             self.proxima_s = min(self.cotizar_en_s, ahora_s + self.cfg.sondeo_s)
             return
 
-        libro = self._leer()
+        # Si el tablero dice que la punta compradora sigue igual y la última
+        # lectura concluyó algo que no depende del azar, no hay nada nuevo que
+        # leer. El libro sigue mandando: esto solo evita releerlo al pedo.
+        if self._sin_novedad(ahora_s):
+            self.proxima_s = ahora_s + self.cfg.sondeo_s
+            return
+
+        libro = self._leer(ahora_s)
         decision = decidir(libro, self.cfg, self.azar)
+        self._estable = decision.estable
+        self._huella_leida = self.ficha.huella if self.ficha else None
 
         if decision.accion is Accion.CEDER:
             self._fase(Fase.CEDIDO, decision.motivo)
@@ -183,7 +230,24 @@ class Vigilante:
         self.tasa_pendiente = None
         self._cotizar(decision, libro, ahora_s)
 
+    def _sin_novedad(self, ahora_s: float) -> bool:
+        """¿El tablero garantiza que releer el libro no aporta nada?"""
+        if not (self.radar_confiable and self.ficha and self.libro):
+            return False
+        if self.ficha.tasa_cpr is None:
+            # Sin punta compradora en el tablero no hay nada que comparar. Se
+            # lee el libro igual: el atajo se gana, no se presume.
+            return False
+        if self._huella_leida is None or not self._estable:
+            return False
+        if self.ficha.huella != self._huella_leida:
+            return False
+        return (ahora_s - self._leido_s) < RELECTURA_S
+
     def _cotizar(self, decision, libro: Libro, ahora_s: float) -> None:
+        # Después de tocar el libro no se saltea nada: la vuelta que viene se
+        # lee de nuevo, pase lo que pase con el POST.
+        self._huella_leida = None
         veredicto = evaluar(decision, self.cfg, self.estado, ahora_s, 0.0)
         if not veredicto:
             self.log("bloqueado", f"[{self.cfg.ident}] gate: {veredicto.motivo}")
@@ -216,7 +280,7 @@ class Vigilante:
             self.log("cotizacion_dudosa", f"[{self.cfg.ident}] no sé si entró: {e}")
         self.estado.registrar(self.cfg.ident, ahora_s)
 
-        libro = self._leer()
+        libro = self._leer(ahora_s)
         v = verificar_despues(libro, self.cfg, decision.tasa)
         self.log("verificacion",
                  f"[{self.cfg.ident}] {'ok' if v else 'PARO'}: {v.motivo}", ok=v.ok)
@@ -228,17 +292,19 @@ class Vigilante:
 
     # -- lecturas ----------------------------------------------------------
 
-    def _leer(self) -> Libro:
+    def _leer(self, ahora_s: float | None = None) -> Libro:
         self._html = self.sesion.subasta(self.cfg.ident)
         libro = parsear_libro(self._html, self.cfg.mi_agente)
         if libro.ident != self.cfg.ident:
             raise LibroIlegible(
                 f"pedí la subasta {self.cfg.ident} y el libro dice {libro.ident}")
         self.libro = libro
+        if ahora_s is not None:
+            self._leido_s = ahora_s
+        self._controlar_radar(libro)
         huella = tuple((o.id, o.tasa, o.ingreso) for o in libro.ofertas)
         if huella != self.huella:
             self.huella = huella
-            self.ultimo_cambio_s = reloj.monotonic()
             mia = libro.mejor_propia()
             ajena = libro.mejor_ajena()
             self.log("libro", f"[{self.cfg.ident}] mía="
@@ -246,17 +312,34 @@ class Vigilante:
                               f"ajena={formatear_tasa(ajena.tasa) if ajena else '-'}")
         return libro
 
+    def _controlar_radar(self, libro: Libro) -> None:
+        """El libro es la verdad; el tablero, una promesa. Se contrastan.
+
+        `tasa-cpr` del listado tendría que ser la mejor punta compradora, que
+        es la mejor oferta del libro. Nunca lo vimos fallar, pero tampoco está
+        documentado: si alguna vez no coincide, el atajo se apaga para el resto
+        de la sesión y el bot vuelve a abrir la subasta en cada vuelta.
+        """
+        if not (self.radar_confiable and self.ficha and self.ficha.tasa_cpr):
+            return
+        mejor = min((o.tasa for o in libro.ofertas), default=None)
+        if mejor is None or mejor == self.ficha.tasa_cpr:
+            return
+        self.radar_confiable = False
+        self.log("radar",
+                 f"[{self.cfg.ident}] el tablero dice {self.ficha.tasa_cpr} y el "
+                 f"libro {mejor}: dejo de confiar en el tablero y releo siempre")
+
     def _mirar_estado(self, ahora_s: float) -> None:
-        """Activa, negociada o desierta. Fuera de activa, el bot no opera."""
+        """Respaldo cuando la mesa no pudo traer el tablero.
+
+        Activa, negociada o desierta. Fuera de activa, el bot no opera.
+        """
         self.visto_estado_s = ahora_s
-        ficha = self.sesion.estado_subasta(self.cfg.ident)
-        if not ficha:
+        fila = self.sesion.estado_subasta(self.cfg.ident)
+        if not fila:
             return                      # informativo; si no llega, se sigue
-        self.estado_subasta = str(ficha.get("estado") or "").strip()
-        self.segmento = str(ficha.get("segmento") or "").strip()
-        if self.estado_subasta and \
-                self.estado_subasta.lower() not in ESTADOS_VIVOS:
-            self._fase(Fase.CERRADA, f"la subasta está {self.estado_subasta.lower()}")
+        self.recibir_ficha(fila, ahora_s)
 
     def _fase(self, fase: Fase, detalle: str) -> None:
         if (fase, detalle) != (self.fase, self.detalle):
@@ -286,4 +369,8 @@ class Vigilante:
                 for o in sorted(self.libro.ofertas, key=lambda o: (o.tasa, o.ingreso))
             ] if self.libro else [],
             falta_s=max(0.0, (self.cotizar_en_s or 0.0) - ahora_s),
+            tmin=self.ficha.tiempo_minimo if self.ficha else None,
+            cierre=self.ficha.hora_cierre if self.ficha else None,
+            cheques=self.ficha.cantidad_cheques if self.ficha else None,
+            agente_vdr=self.ficha.agente_vdr if self.ficha else None,
         )

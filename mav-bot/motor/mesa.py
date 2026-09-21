@@ -7,6 +7,12 @@ faltaba — es que ninguna subasta quede esperando por otra.
 Cada vigilante dice cuándo quiere volver a mirar. La mesa atiende al que le toca
 antes, uno por vuelta. Con el sondeo en 2s y cinco subastas, cada una se
 refresca cada 2s y los pedidos quedan repartidos, no en ráfaga.
+
+Además la mesa lee el tablero: un solo pedido al listado trae la ficha de todas
+las subastas (estado, mejor tasa compradora, T.Min, cierre). Antes cada
+vigilante gastaba un pedido propio solo para preguntar si su subasta seguía
+activa; ahora eso sale gratis y encima le dice a cada uno si vale la pena abrir
+el libro.
 """
 
 from __future__ import annotations
@@ -15,8 +21,17 @@ import random
 import time as reloj
 
 from .config import ConfigSubasta
-from .sesion import Sesion
+from .sesion import ErrorDePlataforma, Sesion, SesionCaida
 from .vigilante import Vigilante, Vista
+
+# Cada cuánto se refresca el tablero (el listado completo). Un pedido, todas las
+# subastas: estado, mejor tasa compradora, T.Min y cierre de cada una.
+CADA_TABLERO_S = 2.0
+
+# Si el listado resulta ser enorme, traerlo entero cada dos segundos deja de
+# convenir. No sabemos de antemano cuantas subastas hay en una rueda, asi que se
+# mide en la primera lectura en vez de suponerlo.
+TABLERO_MAX_FILAS = 1500
 
 
 class Mesa:
@@ -25,6 +40,9 @@ class Mesa:
         self.log = log
         self.azar = azar or random.Random()
         self.vigilantes: dict[int, Vigilante] = {}
+        self.tablero_s = 0.0
+        self.tablero_vivo = True
+        self.tablero_filas: int | None = None
 
     # -- alta y baja -------------------------------------------------------
 
@@ -65,6 +83,7 @@ class Mesa:
         llena de ráfagas.
         """
         ahora_s = reloj.monotonic() if ahora_s is None else ahora_s
+        self._refrescar_tablero(ahora_s)
         pendientes = [v for v in self.activos if v.listo_para(ahora_s)]
         if not pendientes:
             return False
@@ -72,6 +91,38 @@ class Mesa:
         pendientes.sort(key=lambda v: v.proxima_s)
         pendientes[0].tick(ahora_s)
         return True
+
+    def _refrescar_tablero(self, ahora_s: float) -> None:
+        """Un pedido para todas: el listado trae la ficha de cada subasta.
+
+        Si falla no se frena nada. Cada vigilante tiene su propio camino de
+        respaldo (preguntar por su subasta sola) y, sobre todo, el libro sigue
+        siendo quien decide.
+        """
+        activos = self.activos
+        if not activos or not self.tablero_vivo:
+            return
+        if (ahora_s - self.tablero_s) < CADA_TABLERO_S:
+            return
+        self.tablero_s = ahora_s
+        try:
+            tablero = self.sesion.tablero()
+        except (ErrorDePlataforma, SesionCaida) as e:
+            self.log("tablero", f"no pude leer el listado: {e}")
+            return
+        if self.tablero_filas is None:
+            self.tablero_filas = len(tablero)
+            self.log("tablero", f"el listado trae {len(tablero)} subastas")
+            if len(tablero) > TABLERO_MAX_FILAS:
+                # Traer miles de filas cada dos segundos sale mas caro que
+                # preguntar por cada subasta: se apaga y cada una se arregla.
+                self.tablero_vivo = False
+                self.log("tablero", "demasiado grande: vuelvo a preguntar "
+                                    "subasta por subasta")
+        for v in activos:
+            fila = tablero.get(v.cfg.ident)
+            if fila is not None:
+                v.recibir_ficha(fila, ahora_s)
 
     def dormir_hasta(self, ahora_s: float | None = None) -> float:
         """Cuánto puede descansar el hilo sin llegar tarde a nada."""

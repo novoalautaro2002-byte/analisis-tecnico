@@ -50,10 +50,50 @@ Campos que el controller lee de cada elemento: `ident`, `segmento`, `pyme`,
 `caracter`, `certificantes`, `ciega`, `estado`, `favorita`, `monto`, `ppv`,
 `sinrecurso`, `svs`.
 
-Las columnas de la tabla renderizada sugieren que hay más: `1 Neg.`, `Sello`,
-`Tipo`, `Plz`, **`T.Min.`**, **`Cierre`**, `Cpr`, **`Of.C.`**, **`Of.V.`**, `Vdr`,
-`$`, `Monto`, `CH`, `Est.`, `H.Conc.`, `SGR/Lib/Deu/Alm`. Falta ver la respuesta
-real para mapear los nombres.
+#### CONFIRMADO: la respuesta trae mucho más que lo que el controller lee
+
+Diagnóstico del 21/09 sobre la subasta 1556714. Campos reales de cada fila:
+
+```
+agente-cpr, agente-vdr, benef-cuit, benef-razon, cantidad-cheques, caracter,
+cert-pyme, certificantes, ciega, clausula-nalo, con-tasa-v, custodio, depmav,
+detalle-sello, err, es-producto, estado, expone-libr, favorita, fecha-sub,
+hora-cierre, hora-cierre-ss, hora-concer, hora-concer-ss, ident, informa-benef,
+lote-id, mensaje, moneda, moneda-paridad, moneda-signo, monto, perfil-cpr,
+perfil-vdr, plazo-liquidacion, ppv, primera-neg, pyme, razon-cpr, razon-vdr,
+resp-codigo, resp-cuit, resp-nombre, segmento, sinrecurso, solo-exentos, status,
+svs, tasa-cpr, tasa-vdr, tiempo-minimo, tiempo-minimo-ss, tipo-instrumento,
+tipo-sello, usuario, usuario-cpr, vn-cpr, vn-vdr, x-cod-op, x-perfil,
+x-sb-graficador, x-usuario, ya-negociado
+```
+
+Mapeo de las columnas de la pantalla:
+
+| Columna | Campo |
+|---|---|
+| `T.Min.` | `tiempo-minimo` (+ `tiempo-minimo-ss`, segundos) |
+| `Cierre` | `hora-cierre` (+ `hora-cierre-ss`) |
+| `Of.C.` | `tasa-cpr` — la mejor tasa compradora |
+| `Cpr` | `agente-cpr` — el agente que tiene esa punta |
+| `Of.V.` | `tasa-vdr` |
+| `Vdr` | `agente-vdr` |
+| `H.Conc.` | `hora-concer` (+ `hora-concer-ss`) |
+| `CH` | `cantidad-cheques` |
+| `1 Neg.` | `primera-neg` |
+| `Est.` | `estado` (+ `ya-negociado`) |
+
+**Por qué importa.** `tasa-cpr` + `agente-cpr` es exactamente el estado de la
+guerra, y viene por subasta en un solo pedido sin filtrar por `p-ident`. O sea:
+un request alcanza para saber el estado de las N subastas vigiladas. El bot lo
+usa como radar (`motor/ficha.py`, `Mesa._refrescar_tablero`) para dos cosas:
+saber si la subasta sigue activa sin gastar un pedido por subasta, y saber si
+vale la pena abrir el libro.
+
+**Lo que NO hace.** El radar no decide ofertas. La tasa que se carga sale
+siempre del libro de `cpd-versubasta.r`. Que `tasa-cpr` sea la punta compradora
+es una lectura de las columnas, no algo documentado, así que el vigilante
+contrasta las dos fuentes en cada lectura del libro y, si difieren una sola vez,
+apaga el atajo para el resto de la sesión y vuelve a leer siempre.
 
 ### `cpd-api-infosubasta.r?ident=<n>`
 
@@ -316,13 +356,22 @@ Lo leí mal durante todo el relevamiento. En la tabla del listado:
   T.Min es el reloj.
 - **`Of.C.`** es la **oferta compradora**. Ahí es donde sucede la guerra.
 
-Queda por confirmar, y no se deduce: **si los 3 minutos se reinician cuando
-alguien mejora la oferta, o si corren fijos desde el T.Min.**
+### CONFIRMADO: los 3 minutos se reinician con cada mejora
 
-Las dos lecturas llevan a estrategias opuestas:
+Cierre blando. La subasta termina recién cuando pasan 3 minutos sin que nadie
+mejore. Tres consecuencias, y son la base del diseño:
 
-- **Se reinician** → la subasta termina recién cuando pasan 3 minutos sin que
-  nadie mejore. Es desgaste puro, y el valor del bot es enorme: no perdés nunca
-  por no estar mirando la pantalla.
-- **Corren fijos** → es una ventana de 3 minutos, y lo óptimo no es pelear todo
-  el camino sino guardarse para el final.
+1. **La velocidad casi no decide el resultado.** No hay último segundo que ganar:
+   quien mejora reabre el reloj. Gana el que sigue contestando cuando el otro
+   deja de hacerlo. Contestar en 300 ms o en 8 segundos lleva al mismo lugar.
+2. **El valor real del bot no es ser rápido, es no faltar nunca.** Un humano se
+   distrae, atiende el teléfono, mira otra subasta. Ese es el error que el bot
+   no comete, y es el único que importa acá.
+3. **No hay endgame que cronometrar**, así que tampoco hay nada que un ritmo
+   adaptativo pueda optimizar. Es una razón técnica más, además de la
+   instrucción del trader, para que el bot ejecute la orden que recibe al
+   activarse y nada más.
+
+La reacción sí importa en un caso: si el rival mejora y el bot tarda más de 3
+minutos en enterarse, la subasta se ejecuta. Con un sondeo de 1–3 segundos ese
+margen sobra por dos órdenes de magnitud.

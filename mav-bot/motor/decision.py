@@ -31,6 +31,14 @@ class Decision:
     mia: Oferta | None = None
     rival: Oferta | None = None
 
+    estable: bool = True
+    """Si el resultado depende solo del libro, o tambien de como salio el dado.
+
+    Sirve para saber cuando se puede ahorrar una lectura: un "ya gano" se
+    mantiene mientras el libro no se mueva, pero un "aguanto esta vuelta" hay
+    que volver a tirarlo. Marcarlo mal hace que el bot se quede callado.
+    """
+
 
 class SubastaEquivocada(Exception):
     """El libro leido no es el de la subasta configurada."""
@@ -54,7 +62,11 @@ def decidir(libro: Libro, cfg: ConfigSubasta, azar: random.Random) -> Decision:
     if mia is None:
         # Sin oferta cargada a mano no hay nada que modificar. La whitelist es
         # fisica: el bot no puede entrar donde el trader no entro antes.
-        return Decision(Accion.SIN_OFERTA, "no tengo ninguna oferta viva en esta subasta")
+        # El trader puede cargarla en cualquier momento y sin destronar a nadie,
+        # asi que este estado no se sostiene solo: hay que seguir mirando.
+        return Decision(Accion.SIN_OFERTA,
+                        "no tengo ninguna oferta viva en esta subasta",
+                        estable=False)
 
     rival = libro.mejor_ajena()
     if rival is None:
@@ -83,7 +95,8 @@ def decidir(libro: Libro, cfg: ConfigSubasta, azar: random.Random) -> Decision:
         )
 
     if azar.random() > cfg.prob_respuesta:
-        return Decision(Accion.NADA, "aguanto esta vuelta", mia=mia, rival=rival)
+        return Decision(Accion.NADA, "aguanto esta vuelta", mia=mia, rival=rival,
+                        estable=False)
 
     # El piso recorta el decremento en vez de anular la jugada: si todavia queda
     # aire para ganar, no se regala el cheque por como salio el azar.

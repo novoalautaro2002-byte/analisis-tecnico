@@ -40,11 +40,13 @@ class Log:
 
 
 class SesionFalsa:
-    def __init__(self, paginas=None, estado="Activa"):
+    def __init__(self, paginas=None, estado="Activa", tasa_cpr=None):
         self.paginas = paginas if paginas is not None else {}
         self.estado = estado
+        self.tasa_cpr = tasa_cpr        # lo que el tablero dice de la punta
         self.posts = []
         self.lecturas = 0
+        self.tableros = 0
 
     def subasta(self, ident):
         self.lecturas += 1
@@ -54,8 +56,22 @@ class SesionFalsa:
     def cheques(self, ident):
         return html_cheques()
 
+    def _fila(self, ident):
+        return {"ident": str(ident), "estado": self.estado,
+                "segmento": "Avalado", "tasa-cpr": self.tasa_cpr,
+                "agente-cpr": "442", "agente-vdr": "442",
+                "tiempo-minimo": "15:00:00", "hora-cierre": "15:03:00",
+                "cantidad-cheques": "3"}
+
     def estado_subasta(self, ident):
-        return {"estado": self.estado, "segmento": "Avalado"} if self.estado else None
+        return self._fila(ident) if self.estado else None
+
+    def tablero(self):
+        self.tableros += 1
+        if not self.estado:
+            return {}
+        idents = set(self.paginas) | {IDENT}
+        return {i: self._fila(i) for i in idents}
 
     def postear(self, programa, pares, referer_ident=None):
         self.posts.append(dict(pares))
@@ -244,6 +260,118 @@ class TestMesa(unittest.TestCase):
         m = Mesa(SesionFalsa(), Log())
         m.sumar(config(ident=100, sondeo_s=1), vivo=False)
         self.assertEqual(m.dormir_hasta(1000.0), 0.0)
+
+    def test_un_pedido_de_tablero_alcanza_para_todas(self):
+        s = SesionFalsa(tasa_cpr="26,99")
+        m = Mesa(s, Log())
+        for ident in (100, 200, 300):
+            m.sumar(config(ident=ident), vivo=False)
+        for _ in range(3):
+            m.tick(1000.0)
+        self.assertEqual(s.tableros, 1, "un tablero por vuelta, no uno por subasta")
+
+    def test_si_el_tablero_falla_nadie_se_frena(self):
+        class SinTablero(SesionFalsa):
+            def tablero(self):
+                raise ErrorDePlataforma("500")
+
+        s = SinTablero()
+        m = Mesa(s, Log())
+        m.sumar(config(ident=IDENT), vivo=False)
+        m.tick(1000.0)
+        self.assertEqual(s.lecturas, 1)
+        self.assertFalse(m.activos[0].terminado)
+
+
+class TestRadar(unittest.TestCase):
+    """El tablero ahorra lecturas, pero nunca decide una oferta.
+
+    La subasta de prueba tiene la mia en 27,00 y una ajena en 26,99: la mejor
+    punta es 26,99, que es lo que el tablero tiene que estar diciendo.
+    """
+
+    def vigilante(self, ganando=True, **kw):
+        """Por defecto, con la punta propia: ahi la decision es estable.
+
+        Si la mia fuera la peor, el bot cotizaria — y despues de tocar el libro
+        nunca se saltea una lectura, asi que no habria atajo que probar.
+        """
+        filas = [mia("26,98"), ajena("26,99")] if ganando \
+            else [mia("27,00"), ajena("26,99")]
+        punta = "26,98" if ganando else "26,99"
+        s = SesionFalsa(paginas={IDENT: pantalla(filas)}, tasa_cpr=punta)
+        v = Vigilante(config(**kw), s, vivo=False, log=Log())
+        return s, v
+
+    def _radar(self, v, s, ahora_s):
+        v.recibir_ficha(s._fila(v.cfg.ident), ahora_s)
+
+    def test_no_relee_si_la_punta_no_se_movio(self):
+        s, v = self.vigilante()
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        self.assertEqual(s.lecturas, 1)
+        self._radar(v, s, 1002.0)
+        v.tick(1002.0)
+        self.assertEqual(s.lecturas, 1, "el tablero dice que nada cambio")
+
+    def test_relee_apenas_se_mueve_la_punta(self):
+        s, v = self.vigilante()
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        # Alguien se metio abajo: el libro y el tablero se mueven juntos.
+        s.paginas[IDENT] = pantalla([mia("26,98"), ajena("26,97", id=3)])
+        s.tasa_cpr = "26,97"
+        self._radar(v, s, 1002.0)
+        v.tick(1002.0)
+        self.assertEqual(s.lecturas, 2)
+
+    def test_relee_igual_cada_tanto(self):
+        # Un tablero congelado no puede dejar ciego al bot.
+        from motor.vigilante import RELECTURA_S
+        s, v = self.vigilante()
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        self._radar(v, s, 1000.0 + RELECTURA_S + 1)
+        v.tick(1000.0 + RELECTURA_S + 1)
+        self.assertEqual(s.lecturas, 2)
+
+    def test_si_el_tablero_miente_se_apaga(self):
+        s, v = self.vigilante()
+        s.tasa_cpr = "11,11"            # no es la punta del libro
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        self.assertFalse(v.radar_confiable)
+        self._radar(v, s, 1002.0)
+        v.tick(1002.0)
+        self.assertEqual(s.lecturas, 2, "sin radar se relee siempre")
+
+    def test_sin_punta_en_el_tablero_no_hay_atajo(self):
+        s, v = self.vigilante()
+        s.tasa_cpr = None
+        self._radar(v, s, 1000.0)
+        v.tick(1000.0)
+        self._radar(v, s, 1002.0)
+        v.tick(1002.0)
+        self.assertEqual(s.lecturas, 2)
+
+    def test_aguantar_una_vuelta_no_se_vuelve_permanente(self):
+        # "Aguanto esta vuelta" sale de un dado, no del libro: si el atajo lo
+        # congelara, el bot se quedaria callado con un rival abajo.
+        s, v = self.vigilante(ganando=False, prob_respuesta=0.5)
+        v.azar.seed(0)
+        for i in range(6):
+            ahora = 1000.0 + i * 2
+            self._radar(v, s, ahora)
+            v.tick(ahora)
+        self.assertEqual(s.lecturas, 6, "tiene que volver a tirar el dado")
+
+    def test_el_estado_del_tablero_cierra_la_subasta(self):
+        s, v = self.vigilante()
+        s.estado = "Negociada"
+        self._radar(v, s, 1000.0)
+        self.assertIs(v.fase, Fase.CERRADA)
+        self.assertEqual(s.lecturas, 0, "ni siquiera hizo falta abrirla")
 
 
 if __name__ == "__main__":
