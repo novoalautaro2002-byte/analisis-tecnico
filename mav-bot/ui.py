@@ -236,6 +236,14 @@ class Trabajador(threading.Thread):
             "subasta": ("cpd-versubasta.r", lambda: sesion.subasta(ident)),
             "ofertas-compra": ("cpd-of-compra-i.r", lambda: sesion.ofertas_compra(ident)),
             "cheques": ("cpd-ch-subasta-i-v2.r", lambda: sesion.cheques(ident)),
+            # El JSON del listado: hay que ver si trae el tiempo minimo y la
+            # mejor oferta compradora de cada subasta. Si los trae, se puede
+            # vigilar N subastas con un pedido en vez de N.
+            "listado-json": ("cpd-subastas-api.p",
+                             lambda: sesion.listado_crudo(**{"p-ident": ident})),
+            "listado-activas-json": ("cpd-subastas-api.p",
+                                     lambda: sesion.listado_crudo(
+                                         **{"p-estado": "Activas"})),
         }
         guardados, filas = [], []
         for nombre, (_, traer) in paginas.items():
@@ -244,14 +252,28 @@ class Trabajador(threading.Thread):
             except (ErrorDePlataforma, SesionCaida) as e:
                 filas.append(f"{nombre}: no se pudo leer ({e})")
                 continue
-            ruta = carpeta / f"diag_{sello}_{nombre}.html"
+            ext = "json" if nombre.endswith("json") else "html"
+            ruta = carpeta / f"diag_{sello}_{nombre}.{ext}"
             ruta.write_text(html, encoding="latin-1", errors="replace")
             guardados.append(ruta.name)
             if nombre == "subasta":
                 filas.extend(self._resumen_libro(html, self.agente))
+            elif nombre == "listado-json":
+                filas.append(self._resumen_json(html))
 
         self._set(mirado=None, aviso=" | ".join(filas) +
                   f"  →  guardado en logs/: {', '.join(guardados)}")
+
+    @staticmethod
+    def _resumen_json(crudo: str) -> str:
+        """Que campos trae cada fila del listado, para saber que se puede usar."""
+        try:
+            filas = json.loads(crudo).get("work-json") or []
+        except (json.JSONDecodeError, AttributeError):
+            return "el listado no devolvio JSON"
+        if not filas:
+            return "el listado vino vacio"
+        return "campos del listado: " + ", ".join(sorted(filas[0]))
 
     @staticmethod
     def _resumen_libro(html: str, agente: str = "") -> list[str]:

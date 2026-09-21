@@ -305,3 +305,24 @@ Consecuencias:
 - Mientras el bot corre, el trader no puede mirar MAV en su navegador: mira por
   la interfaz del bot. Si quiere retomar el control, el bot para y él vuelve a
   entrar en el navegador.
+
+## Corrección: `T.Min` es tiempo, no tasa
+
+Lo leí mal durante todo el relevamiento. En la tabla del listado:
+
+- **`T.Min`** es el **tiempo mínimo**: la hora a partir de la cual empieza a
+  correr la cuenta regresiva de **3 minutos** para que la subasta se ejecute.
+  Antes de esa hora la guerra de tasas ya está corriendo; lo que arranca en el
+  T.Min es el reloj.
+- **`Of.C.`** es la **oferta compradora**. Ahí es donde sucede la guerra.
+
+Queda por confirmar, y no se deduce: **si los 3 minutos se reinician cuando
+alguien mejora la oferta, o si corren fijos desde el T.Min.**
+
+Las dos lecturas llevan a estrategias opuestas:
+
+- **Se reinician** → la subasta termina recién cuando pasan 3 minutos sin que
+  nadie mejore. Es desgaste puro, y el valor del bot es enorme: no perdés nunca
+  por no estar mirando la pantalla.
+- **Corren fijos** → es una ventana de 3 minutos, y lo óptimo no es pelear todo
+  el camino sino guardarse para el final.

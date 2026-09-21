@@ -269,6 +269,19 @@ class Sesion:
     def subasta(self, ident: int) -> str:
         return self.get("cpd-versubasta.r", ident=ident)
 
+    def listado_crudo(self, **filtros) -> str:
+        """El JSON del listado tal cual lo manda la plataforma.
+
+        Sirve para ver que campos trae de verdad: el JavaScript de MAV lee solo
+        algunos, asi que desde afuera no se sabe que mas hay adentro.
+        """
+        base = {"p-estado": "Todas", "p-subasta": "", "p-segmento": "",
+                "p-instrumento": "", "p-moneda": "", "p-sgr": "", "p-plazo": "",
+                "p-cuit": "", "p-ident": "", "p-montoDesde": "",
+                "p-montoHasta": "", "p-ppvdesde": "", "p-ppvhasta": ""}
+        base.update(filtros)
+        return self.get("cpd-subastas-api.p", **base)
+
     def estado_subasta(self, ident: int) -> dict | None:
         """Ficha de la subasta, del endpoint JSON del listado.
 
