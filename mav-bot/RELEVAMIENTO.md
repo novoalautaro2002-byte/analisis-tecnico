@@ -274,3 +274,34 @@ frameset de primer nivel.
 - [ ] Un `myData` con varias ofertas de agentes distintos, para ver el orden y
       confirmar que `Baja` solo aparece en las propias
 - [ ] Si la plataforma admite dos sesiones simultáneas del mismo usuario
+
+## CONFIRMADO: sesión única por usuario
+
+El login del bot devolvió, textual:
+
+> «Existe una sesión activa para el usuario en otra ubicación. Cierre
+> correctamente la sesión anterior y vuelva a intentar.»
+
+Era la pregunta de fondo desde el brief original, y la respuesta es la que más
+restringe: **el usuario no puede tener dos sesiones a la vez.** El trader
+logueado en su navegador y el bot logueado por su cuenta se excluyen.
+
+Consecuencias:
+
+- El bot y el trader comparten una sola sesión. O el bot la toma (el trader
+  cierra la del navegador y opera a través del bot), o el bot usa la sesión del
+  navegador del trader (misma cookie, misma máquina).
+- El lote se ejecuta en serie, no en paralelo: era el supuesto del brief y queda
+  firme.
+- La secuencia que evita el conflicto y preserva la garantía de no tocar
+  comitentes:
+    1. El trader se loguea en su navegador y carga la oferta inicial a mano
+       (comitente + primera tasa).
+    2. Cierra la sesión del navegador (botón Salida, no solo la pestaña).
+    3. Se loguea desde el bot. La oferta ya está viva en el libro y sobrevive al
+       cambio de sesión, porque es una orden del mercado, no un estado de
+       pantalla.
+    4. El bot defiende la tasa. Nunca toca el comitente, que ya está cargado.
+- Mientras el bot corre, el trader no puede mirar MAV en su navegador: mira por
+  la interfaz del bot. Si quiere retomar el control, el bot para y él vuelve a
+  entrar en el navegador.
