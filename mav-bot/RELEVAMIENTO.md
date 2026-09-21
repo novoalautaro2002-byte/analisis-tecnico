@@ -184,6 +184,50 @@ replicarlas él mismo o va a mandar cosas que el servidor puede aceptar mal.
 Es el `else` del `window.confirm()` de `ofertaCompra()`, no un rechazo del
 servidor. Si aparece, es que se canceló el cartel: no se mandó nada.
 
+### Decisión de arquitectura: el bot solo toca la tasa
+
+El trader carga a mano el comitente y la primera oferta. El bot se engancha a esa
+página ya abierta y lo único que hace es, cuando alguien lo supera, escribir la
+tasa nueva en el input `tasa` y apretar "Modificar Tasa Cpr.", aceptando el
+`confirm()`.
+
+No arma el POST. No escribe un solo campo de comitente.
+
+Esto es posible porque `cpd-ch-subasta-i-v2.r` trae los comitentes ya resueltos
+desde el servidor, en campos ocultos paralelos a los visibles:
+
+```html
+<input type='text'   name='comit-cpr<idCheque>' value='<comitente>'>   <!-- visible -->
+<input type="hidden" name="comitcpr<idCheque>"  value="<comitente>">   <!-- el que viaja -->
+<input type="hidden" name="cuitcpr<idCheque>"   value="<cuit>">
+<input type="hidden" name="excepcpr<idCheque>"  value="Si">
+<input type="hidden" name="condcpr<idCheque>"   value="EX">
+```
+
+Los visibles copian al oculto por `onKeyUp` / `onBlur`, pero el oculto **ya viene
+con valor del servidor**, así que sobrevive a los recargos de página que provoca
+cada POST. El bot no necesita que el trader vuelva a tipear nada.
+
+Lo que gana este diseño:
+
+- **El comitente nunca lo escribe el bot.** Es el campo donde un error significa
+  comprar para el cliente equivocado, y queda fuera de su alcance por completo.
+- **Corren las validaciones de la plataforma.** Coma decimal, tasa negativa solo
+  en PAGARE y FCE, comitente obligatorio: las hace el JS de la página, no hay que
+  replicarlas ni mantenerlas sincronizadas.
+- **La whitelist es física.** El bot solo puede actuar sobre una subasta donde el
+  trader ya cargó una oferta a mano. Si no hay oferta, no hay nada que modificar.
+  No hay una lista de IDs en un archivo de configuración que pueda estar mal.
+- **Falla cerrado por construcción.** Sin página abierta y sin oferta viva, el bot
+  no tiene por dónde actuar.
+
+Lo que cuesta: el bot depende de dos selectores del DOM (el input `tasa` y el
+botón). Es una dependencia de scraping, pero de dos elementos, contra armar un
+POST entero de 60 campos. El cambio es muy favorable.
+
+El `window.confirm()` se acepta automáticamente desde el driver. Queda como punto
+de decisión explícito y logueado.
+
 ### iframes anidados
 
 Dentro de la pantalla hay dos más:
