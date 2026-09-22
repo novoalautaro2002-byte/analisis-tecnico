@@ -38,6 +38,21 @@ from motor.sesion import ErrorDePlataforma, IngresoRechazado, Sesion, SesionCaid
 AQUI = Path(__file__).parent
 PUERTO = 8733
 
+
+def version() -> str:
+    """Fecha del archivo mas nuevo del bot.
+
+    Existe porque la pregunta "¿estas corriendo la version con el arreglo?" nos
+    costo una vuelta entera. Sale de los archivos, asi que se actualiza sola con
+    cada ACTUALIZAR.bat y no depende de que alguien se acuerde de tocar nada.
+    """
+    try:
+        archivos = [*AQUI.glob("*.py"), *AQUI.glob("motor/*.py"),
+                    *AQUI.glob("ui/*.html")]
+        return f"{datetime.fromtimestamp(max(a.stat().st_mtime for a in archivos)):%d/%m %H:%M}"
+    except (ValueError, OSError):
+        return "?"
+
 # En MAV se opera por agente y el del trader no cambia nunca, asi que viene
 # puesto. Se puede editar en pantalla si hace falta.
 AGENTE_POR_DEFECTO = "442"
@@ -66,6 +81,7 @@ class Trabajador(threading.Thread):
             "mirado": None,
             "aviso": None,
             "log": [],
+            "version": version(),
         }
 
     # -- lo que ve la interfaz --------------------------------------------

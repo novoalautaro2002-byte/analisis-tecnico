@@ -105,6 +105,7 @@
              value="442">
     </span>
     <span class="chip" id="chip-mesa" hidden></span>
+    <span class="chip" id="chip-version" title="Fecha de los archivos del bot. Sirve para saber si actualizaste."></span>
     <span style="flex:1"></span>
     <label class="chip" for="sonido" style="cursor:pointer;margin:0"
            title="Suena cuando una subasta se frena, cede o cierra. No suena por cotizar.">
@@ -375,12 +376,14 @@ function panel(s) {
                oninput="anotar('${k}',this.value)"></div>`).join('')}
     </div>
     <div class="fila" style="margin-top:9px">
-      <button onclick="guardar(${s.ident})">Guardar condiciones</button>
+      <button id="guardar-${s.ident}" onclick="guardar(${s.ident})">Guardar condiciones</button>
       <button class="neutro" onclick="abrirPanel(${s.ident})">cancelar</button>
       <span style="flex:1"></span>
       <div class="campo"><label>Cargar tu tasa</label>
-        <input id="manual-${s.ident}" placeholder="${esc(s.mia || '23,90')}"></div>
-      <button class="peligro" onclick="cargarTasa(${s.ident})"
+        <input id="manual-${s.ident}" value="${esc(tocado.__manual ?? '')}"
+               oninput="anotar('__manual',this.value)"
+               placeholder="${esc(s.mia || '23,90')}"></div>
+      <button id="cargar-${s.ident}" class="peligro" onclick="cargarTasa(${s.ident})"
         title="Manda tu tasa a MAV por el mismo camino que usa el bot. Después el bot sigue defendiendo desde ahí.">Cargar</button>
     </div>
     <p class="nota">Cambiar las condiciones no saca la subasta: el bot sigue
@@ -392,7 +395,8 @@ function panel(s) {
 function guardar(ident) {
   const s = (ultimo.subastas || []).find(x => x.ident === ident);
   if (!s) return;
-  const p = {...s.cfg, ...tocado, ident};
+  const {__manual, ...campos} = tocado;      // la tasa manual no es una condición
+  const p = {...s.cfg, ...campos, ident};
   if (!p.piso) { avisoLocal = 'Falta el piso.'; return refrescar(); }
   if (p.piso !== s.cfg.piso && s.vivo &&
       !confirm(`Subasta ${ident} en VIVO.\n\nPiso: ${s.cfg.piso} → ${p.piso}\n\n`
@@ -405,7 +409,7 @@ function guardar(ident) {
 
 function cargarTasa(ident) {
   const s = (ultimo.subastas || []).find(x => x.ident === ident);
-  const tasa = ($('manual-' + ident).value || '').trim();
+  const tasa = (tocado.__manual || '').trim();
   if (!tasa) { avisoLocal = 'Escribí la tasa que querés cargar.'; return refrescar(); }
   let extra = '';
   if (s && s.cfg && cmpTasa(tasa, s.cfg.piso) < 0)
@@ -526,6 +530,7 @@ async function refrescar() {
   $('panel-sesion').hidden = e.sesion && !campoPendiente;
 
   ultimo = e;
+  $('chip-version').textContent = 'v ' + (e.version || '?');
   const subs = e.subastas || [];
   const activas = subs.filter(s => !['cedido','cerrada','detenido'].includes(s.fase));
   $('chip-mesa').hidden = !subs.length;
