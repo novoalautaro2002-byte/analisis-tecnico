@@ -1,8 +1,9 @@
 RUTINA DE TODOS LOS DIAS
 ========================
 
-MAV permite UNA SOLA SESION por usuario. El navegador y el bot no pueden
-estar logueados al mismo tiempo. Por eso el orden es este y no otro.
+Tenes dos usuarios sobre el agente 442: uno tuyo y uno del bot. MAV
+permite una sola sesion POR USUARIO, asi que con dos usuarios podes
+tener MAV abierto en el navegador Y el bot corriendo al mismo tiempo.
 
 
 1.  Abris MAV en el navegador, como siempre, con tu 2FA.
@@ -11,17 +12,32 @@ estar logueados al mismo tiempo. Por eso el orden es este y no otro.
     Esto lo haces vos siempre. El bot no entra donde vos no entraste;
     solo defiende lo que ya esta cargado.
 
-3.  CERRAS LA SESION CON EL BOTON SALIDA. No alcanza con cerrar la
-    pestaña. Si no, el bot no va a poder entrar y te va a decir:
+3.  Doble clic en "Mesa MAV" (el icono del Escritorio).
+
+4.  Ingresas ahi con EL USUARIO DEL BOT, no con el tuyo. Te llega el
+    codigo, lo ponés.
+
+    MAV permite una sola sesion POR USUARIO. Con dos usuarios podes
+    tener MAV abierto en el navegador y el bot corriendo al mismo
+    tiempo. Con el mismo usuario en los dos lados, no: te va a decir
     "existe una sesion activa para el usuario en otra ubicacion".
 
-4.  Doble clic en "Mesa MAV" (el icono del Escritorio).
+5.  Sumas cada subasta: numero y piso. El resto viene puesto.
 
-5.  Ingresas ahi: mismo usuario, te llega el codigo, lo ponés.
+6.  Dejas la ventana negra abierta y miras.
 
-6.  Sumas cada subasta: numero y piso. El resto viene puesto.
 
-7.  Dejas la ventana negra abierta y miras.
+UNA SUBASTA LA MANEJA UNO SOLO
+------------------------------
+Los dos usuarios son el agente 442, asi que para el bot tu oferta y la
+suya son la misma: hay UNA sola oferta por agente y por subasta.
+
+Mientras el bot este VIVO en una subasta, no la toques a mano. No te va
+a pisar (cuando relee ve una tasa que no mando y frena), pero frena — y
+una subasta frenada es una subasta sin defensa.
+
+En SOMBRA no hay problema: no manda nada. Podes pelear vos a mano y el
+bot va anotando al lado lo que el habria hecho.
 
 
 EL BOT TE AVISA

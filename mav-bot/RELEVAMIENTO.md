@@ -331,29 +331,39 @@ El login del bot devolvió, textual:
 > «Existe una sesión activa para el usuario en otra ubicación. Cierre
 > correctamente la sesión anterior y vuelva a intentar.»
 
-Era la pregunta de fondo desde el brief original, y la respuesta es la que más
-restringe: **el usuario no puede tener dos sesiones a la vez.** El trader
-logueado en su navegador y el bot logueado por su cuenta se excluyen.
+El límite es **por usuario**, no por agente ni por máquina: un mismo usuario no
+puede tener dos sesiones a la vez.
 
-Consecuencias:
+### El trader tiene dos usuarios, y eso lo cambia todo
 
-- El bot y el trader comparten una sola sesión. O el bot la toma (el trader
-  cierra la del navegador y opera a través del bot), o el bot usa la sesión del
-  navegador del trader (misma cookie, misma máquina).
-- El lote se ejecuta en serie, no en paralelo: era el supuesto del brief y queda
-  firme.
-- La secuencia que evita el conflicto y preserva la garantía de no tocar
-  comitentes:
-    1. El trader se loguea en su navegador y carga la oferta inicial a mano
-       (comitente + primera tasa).
-    2. Cierra la sesión del navegador (botón Salida, no solo la pestaña).
-    3. Se loguea desde el bot. La oferta ya está viva en el libro y sobrevive al
-       cambio de sesión, porque es una orden del mercado, no un estado de
-       pantalla.
-    4. El bot defiende la tasa. Nunca toca el comitente, que ya está cargado.
-- Mientras el bot corre, el trader no puede mirar MAV en su navegador: mira por
-  la interfaz del bot. Si quiere retomar el control, el bot para y él vuelve a
-  entrar en el navegador.
+Durante un tiempo dimos por hecho que el bot y el trader se excluían, y escribí
+acá que mientras el bot corriera el trader no iba a poder mirar MAV. **Es
+falso.** El trader tiene dos usuarios sobre el mismo agente 442: uno para él y
+otro para el bot. Las dos sesiones conviven.
+
+Lo que se cae de aquella conclusión:
+
+- El trader **puede** tener MAV abierto en el navegador mientras el bot opera.
+  No queda ciego ni depende de la pantalla del bot para ver el mercado.
+- No hay que cerrar la sesión del navegador antes de arrancar el bot.
+- Se puede correr el bot **en sombra al lado del trader**, los dos sobre la
+  misma subasta, y comparar lo que el bot habría hecho contra lo que el trader
+  hizo. Es la mejor validación disponible antes de operar en vivo, y con una
+  sola sesión no existía.
+
+Lo que sigue en pie:
+
+- La oferta inicial la carga el trader a mano (comitente + primera tasa). El
+  bot no entra donde el trader no entró; solo defiende.
+- **La propiedad es por agente, así que los dos usuarios son "propios" para el
+  bot.** La oferta que carga el trader con su usuario, el bot la lee como suya.
+  Eso es justo lo que hace posible la prueba en sombra.
+- **En vivo, una subasta la maneja uno solo.** Como hay una sola oferta por
+  agente, si el trader la modifica a mano mientras el bot la está defendiendo,
+  los dos escriben sobre lo mismo. El bot no pisa al trader — al releer ve una
+  tasa que no es la que mandó y frena — pero frena, y eso es una subasta sin
+  defensa. Mientras el bot esté vivo en una subasta, esa subasta no se toca a
+  mano.
 
 ## Corrección: `T.Min` es tiempo, no tasa
 
