@@ -199,6 +199,21 @@ class TestValidacionesDelCliente(unittest.TestCase):
         p = armar_oferta(html_subasta(), html_cheques(comitente="51414"), "26,98")
         self.assertEqual(dict(p.pares())[f"comitcpr{CHEQUES[0]}"], "51414")
 
+    def test_un_lote_grande_entra_entero(self):
+        """La 1558015 real tenia 45 cheques. El simulacro usa 2.
+
+        Un lote asi son casi 200 campos por cheque en el mismo POST. Nada en el
+        codigo depende de la cantidad, pero es la clase de supuesto que se
+        descubre tarde, asi que queda probado.
+        """
+        muchos = tuple(f"{2579750 + i:08d}" for i in range(45))
+        p = armar_oferta(html_subasta(cheques=muchos),
+                         html_cheques(cheques=muchos), "23,90")
+        campos = dict(p.pares())
+        self.assertEqual(sum(1 for k in campos if k.startswith("comitcpr")), 45)
+        self.assertTrue(all(campos[f"comitcpr{c}"] == "51414" for c in muchos))
+        self.assertEqual(campos["tasa"], "23,90")
+
     def test_la_tasa_viaja_con_coma(self):
         # Con punto, el JS de la plataforma rechaza antes de postear.
         p = armar_oferta(html_subasta(), html_cheques(), "26,98")

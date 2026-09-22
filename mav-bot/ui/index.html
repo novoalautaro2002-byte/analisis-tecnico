@@ -129,8 +129,9 @@
       <button id="btn-codigo">Confirmar</button>
     </div>
     <p class="nota">
-      MAV admite una sola sesión por usuario: cerrá la del navegador antes de
-      entrar acá. La contraseña y el código no se guardan en ningún lado.
+      MAV admite una sola sesión <b>por usuario</b>. Si acá entrás con un
+      usuario distinto al del navegador, los dos conviven. Con el mismo, no.
+      La contraseña y el código no se guardan en ningún lado.
       El <b>agente</b> de arriba es lo que define qué oferta del libro es tuya.
     </p>
   </div>
@@ -292,7 +293,7 @@ function pintarMirado(m) {
         <div class="v" style="font-size:15px">${esc(m.segmento)}</div></div>`:''}
       ${m.tmin?`<div><div class="k">T. mínimo</div>
         <div class="v" style="font-size:15px">${esc(m.tmin)}</div></div>`:''}
-      ${m.cierre?`<div><div class="k">Cierre</div>
+      ${m.cierre?`<div><div class="k">Límite</div>
         <div class="v" style="font-size:15px">${esc(m.cierre)}</div></div>`:''}
       ${m.cheques?`<div><div class="k">Cheques</div>
         <div class="v" style="font-size:15px">${m.cheques}</div></div>`:''}
@@ -303,9 +304,11 @@ function pintarMirado(m) {
 
 function tarjeta(s) {
   const falta = s.falta_s > 0.4 ? ` · mueve en ${s.falta_s.toFixed(0)}s` : '';
-  // T.Min es la hora desde la cual corren los 3 minutos, y el cierre se corre
-  // con cada mejora: mirarlos juntos dice cuánto aire queda de verdad.
-  const reloj = [s.tmin?`T.Min ${esc(s.tmin)}`:'', s.cierre?`cierra ${esc(s.cierre)}`:'']
+  // T.Min arma el reloj; el cierre es el límite duro del día, NO la cuenta
+  // regresiva. Esa cuenta (2 minutos sin mejoras) no se ve desde afuera: el
+  // listado no la trae. Decirle "cierra" invitaba a leerla como el tiempo que
+  // queda, que es justo lo que no es.
+  const reloj = [s.tmin?`T.Min ${esc(s.tmin)}`:'', s.cierre?`límite ${esc(s.cierre)}`:'']
     .filter(Boolean).join(' · ');
   return `<div class="sub ${s.fase}">
     <header>

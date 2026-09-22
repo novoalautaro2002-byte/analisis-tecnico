@@ -375,7 +375,60 @@ Lo leí mal durante todo el relevamiento. En la tabla del listado:
   T.Min es el reloj.
 - **`Of.C.`** es la **oferta compradora**. Ahí es donde sucede la guerra.
 
-### CONFIRMADO: los 3 minutos se reinician con cada mejora
+### MEDIDO: la cuenta se reinicia, y la ventana es de 2 minutos
+
+Sombra sobre la subasta **1558015** el 22/09, una guerra real de seis minutos
+que el trader no jugó. La ficha de MAV al cerrar:
+
+```
+T. Mínimo      11:55:38
+H. Cierre      17:00'
+H. Concert.    12:19:50
+Descuento      24,50 %
+Ag.Vend.       720      Cant.Inst. 45     Monto $266.790.300
+```
+
+y las dos últimas ofertas del libro:
+
+```
+2050131   ag 287   23,90   12:17:49
+2050129   ag 523   23,95   12:17:30
+```
+
+La aritmética cierra una discusión y abre otra:
+
+- **Última oferta → concertación: 2 minutos 1 segundo.** La cuenta se reinicia
+  con cada mejora, sin duda: si corriera fija desde el T.Min, la subasta habría
+  cerrado a las 11:58:38, veinte minutos antes.
+- **Pero la ventana midió 2 minutos, no 3.** El trader dijo 3 de memoria. Queda
+  pendiente confirmar si son 2 siempre o depende del segmento. No cambia el
+  diseño — el bot reacciona en segundos — pero sí cuánto margen hay.
+- **`H. Cierre` (17:00') es el límite duro del día, no la cuenta regresiva.**
+  El listado no trae cuánto falta para el cierre blando: ese reloj no se ve
+  desde afuera. La pantalla del bot dice "límite" y no "cierra" por eso.
+
+### El camino de lectura, validado contra MAV
+
+El bot leyó, sin participar:
+
+| MAV (ingreso) | El bot lo vio | Atraso |
+|---|---|---|
+| 23,95 a las 12:17:30 | 12:17:32 | 2s |
+| 23,90 a las 12:17:49 | 12:17:52 | 3s |
+
+El atraso es el sondeo configurado. Nueve movimientos en seis minutos, de 24,48
+a 23,90, todos leídos; el cierre detectado solo. Es la primera vez que el parser
+corre contra una rueda real completa.
+
+También quedó confirmado, de rebote, que **`tasa-cpr` del listado es la punta
+compradora**: a las 12:14:11 el tablero decía 24,48 y el libro 24,45 — una
+lectura de atraso, no otra cosa. Era la única interpretación que faltaba probar.
+
+Y el dato operativo: **287 le contestó a 523 en 19 segundos**, y 523 no volvió a
+contestar. Perdió un lote de 266 millones por no estar mirando.
+
+### Lo anterior, que quedó corregido arriba
+
 
 Cierre blando. La subasta termina recién cuando pasan 3 minutos sin que nadie
 mejore. Tres consecuencias, y son la base del diseño:
