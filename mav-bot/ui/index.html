@@ -371,7 +371,8 @@ function panel(s) {
   return `<div class="editor">
     <div class="fila">
       ${CAMPOS.map(([k, t]) => `<div class="campo"><label>${t}</label>
-        <input value="${val(k)}" oninput="anotar('${k}',this.value)"></div>`).join('')}
+        <input id="ed-${s.ident}-${k}" value="${val(k)}"
+               oninput="anotar('${k}',this.value)"></div>`).join('')}
     </div>
     <div class="fila" style="margin-top:9px">
       <button onclick="guardar(${s.ident})">Guardar condiciones</button>
@@ -531,7 +532,23 @@ async function refrescar() {
   $('chip-mesa').textContent = `${activas.length} activa(s) de ${subs.length}`;
   $('btn-parar').hidden = !activas.length;
 
+  // Repintar la grilla entera destruye los <input> del panel de edicion, y con
+  // ellos el foco y la posicion del cursor: escribias una letra y al segundo
+  // siguiente estabas afuera del casillero. Se anota donde estaba el cursor y
+  // se lo devuelve despues de repintar.
+  const foco = document.activeElement;
+  const focoId = foco && foco.id && $('grilla').contains(foco) ? foco.id : null;
+  const cursor = focoId ? foco.selectionStart : null;
+
   $('grilla').innerHTML = subs.map(tarjeta).join('');
+
+  if (focoId) {
+    const n = $(focoId);
+    if (n) {
+      n.focus();
+      try { n.setSelectionRange(cursor, cursor); } catch {}
+    }
+  }
 
   const aviso = $('aviso');
   const texto = avisoLocal || e.aviso;
