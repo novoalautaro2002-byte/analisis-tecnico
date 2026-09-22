@@ -147,11 +147,11 @@
         <input id="dec-min" value="0,01"></div>
       <div class="campo"><label for="dec-max">Baja máx.</label>
         <input id="dec-max" value="0,01"></div>
-      <div class="campo"><label for="esp-min">Espera mín. s</label>
+      <div class="campo"><label for="esp-min" title="Desde que ve que te pisaron hasta que carga. En 0 contesta apenas lo ve.">Tarda en mover, mín. s</label>
         <input id="esp-min" value="0"></div>
-      <div class="campo"><label for="esp-max">Espera máx. s</label>
+      <div class="campo"><label for="esp-max" title="El otro extremo. Si es distinto del mínimo, la demora sale al azar en ese rango y el bot es menos predecible.">Tarda en mover, máx. s</label>
         <input id="esp-max" value="0"></div>
-      <div class="campo"><label for="sondeo">Sondeo s</label>
+      <div class="campo"><label for="sondeo" title="Cada cuánto relee el libro. Es lo que tarda en ENTERARSE, no en mover.">Mira cada, s</label>
         <input id="sondeo" value="1"></div>
       <div class="campo"><label for="prob">Prob.</label>
         <input id="prob" value="1.0"></div>
@@ -200,7 +200,7 @@ function params(vivo) {
     decremento_min: $('dec-min').value.trim(), decremento_max: $('dec-max').value.trim(),
     espera_min: $('esp-min').value.trim()||'0', espera_max: $('esp-max').value.trim()||'0',
     sondeo: $('sondeo').value.trim()||'2', prob: $('prob').value.trim()||'1',
-    max_recotizaciones: $('max-reco').value.trim()||'60', vivo,
+    max_recotizaciones: $('max-reco').value.trim()||'200', vivo,
   };
 }
 
