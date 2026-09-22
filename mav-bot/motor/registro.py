@@ -23,7 +23,13 @@ class Registro:
 
     def __call__(self, evento: str, mostrar: str | None = None, **datos) -> None:
         ahora = datetime.now()
-        fila = {"t": ahora.isoformat(timespec="seconds"), "evento": evento, **datos}
+        # El texto va al archivo tambien. Guardar solo el nombre del evento
+        # dejaba un log inservible para reconstruir una rueda despues: decia
+        # "libro" cincuenta veces sin decir que habia en el libro.
+        fila = {"t": ahora.isoformat(timespec="seconds"), "evento": evento}
+        if mostrar:
+            fila["texto"] = mostrar
+        fila.update(datos)
         self.fh.write(json.dumps(fila, ensure_ascii=False, default=str) + "\n")
         # Sin flush, un corte se lleva justamente los eventos que interesan.
         self.fh.flush()

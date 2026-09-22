@@ -361,9 +361,23 @@ class Vigilante:
             self.huella = huella
             mia = libro.mejor_propia()
             ajena = libro.mejor_ajena()
+            # El libro entero, no solo las puntas: es lo unico que permite
+            # reconstruir despues una rueda movimiento por movimiento, que es
+            # para lo que existe el modo sombra.
             self.log("libro", f"[{self.cfg.ident}] mía="
                               f"{formatear_tasa(mia.tasa) if mia else '-'} "
-                              f"ajena={formatear_tasa(ajena.tasa) if ajena else '-'}")
+                              f"ajena={formatear_tasa(ajena.tasa) if ajena else '-'}",
+                     ident=self.cfg.ident,
+                     mia=formatear_tasa(mia.tasa) if mia else None,
+                     ajena=formatear_tasa(ajena.tasa) if ajena else None,
+                     estado=self.estado_subasta,
+                     cierre=self.ficha.hora_cierre if self.ficha else None,
+                     libro=[{"id": o.id, "ag": o.agente,
+                             "tasa": formatear_tasa(o.tasa),
+                             "hora": o.ingreso.strftime("%H:%M:%S"),
+                             "propia": o.propia}
+                            for o in sorted(libro.ofertas,
+                                            key=lambda o: (o.tasa, o.ingreso))])
         return libro
 
     def _controlar_radar(self, libro: Libro, quieto: bool) -> None:
