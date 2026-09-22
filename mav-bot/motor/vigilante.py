@@ -93,10 +93,11 @@ class Vista:
     segmento: str | None = None
     ofertas: list = field(default_factory=list)
     falta_s: float = 0.0
-    tmin: str | None = None       # T.Min: desde ahi corren los 3 minutos
-    cierre: str | None = None     # cierre previsto; se corre con cada mejora
+    tmin: str | None = None       # T.Min: desde ahi se arma el reloj
+    cierre: str | None = None     # limite duro del dia, NO la cuenta regresiva
     cheques: int | None = None
     agente_vdr: str | None = None
+    tasa_vdr: str | None = None   # la que cargo el vendedor: el techo de la puja
 
 
 class Vigilante:
@@ -454,4 +455,6 @@ class Vigilante:
             cierre=self.ficha.hora_cierre if self.ficha else None,
             cheques=self.ficha.cantidad_cheques if self.ficha else None,
             agente_vdr=self.ficha.agente_vdr if self.ficha else None,
+            tasa_vdr=(formatear_tasa(self.ficha.tasa_vdr)
+                      if self.ficha and self.ficha.tasa_vdr is not None else None),
         )

@@ -66,7 +66,8 @@ class SesionFalsa:
         return {"ident": str(ident), "estado": self.estado,
                 "segmento": "Avalado", "tasa-cpr": self.tasa_cpr,
                 "agente-cpr": "442", "agente-vdr": "442",
-                "tiempo-minimo": "15:00:00", "hora-cierre": "15:03:00",
+                "tasa-vdr": "24,50",
+                "tiempo-minimo": "11:55:38", "hora-cierre": "17:00",
                 "cantidad-cheques": "3"}
 
     def estado_subasta(self, ident):
@@ -544,6 +545,16 @@ class TestRadar(unittest.TestCase):
             self._radar(v, s, ahora)
             v.tick(ahora)
         self.assertEqual(s.lecturas, 6, "tiene que volver a tirar el dado")
+
+    def test_la_vista_muestra_la_tasa_del_vendedor(self):
+        # Es el techo de la puja: la guerra real de la 1558015 arranco en 24,48
+        # justo abajo del 24,50 que habia cargado el vendedor.
+        s, v = self.vigilante()
+        self._radar(v, s, 1000.0)
+        vista = v.vista(1000.0)
+        self.assertEqual(vista.tasa_vdr, "24,50")
+        self.assertEqual(vista.tmin, "11:55:38")
+        self.assertEqual(vista.cierre, "17:00")
 
     def test_el_estado_del_tablero_cierra_la_subasta(self):
         s, v = self.vigilante()

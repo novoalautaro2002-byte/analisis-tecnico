@@ -400,9 +400,15 @@ La aritmética cierra una discusión y abre otra:
 - **Última oferta → concertación: 2 minutos 1 segundo.** La cuenta se reinicia
   con cada mejora, sin duda: si corriera fija desde el T.Min, la subasta habría
   cerrado a las 11:58:38, veinte minutos antes.
-- **Pero la ventana midió 2 minutos, no 3.** El trader dijo 3 de memoria. Queda
-  pendiente confirmar si son 2 siempre o depende del segmento. No cambia el
-  diseño — el bot reacciona en segundos — pero sí cuánto margen hay.
+- **La ventana es de 2 minutos, no de 3.** Medido acá y confirmado por el
+  trader; los 3 minutos habían sido de memoria. No cambia el diseño — el bot
+  reacciona en segundos — pero sí cuánto margen tiene un humano: dos minutos sin
+  contestar y perdiste el lote.
+- **`Descuento` (24,50 %) es la tasa que cargó el vendedor**, o sea `tasa-vdr`
+  del listado: el techo de la puja. La guerra arrancó en 24,48, justo abajo de
+  ese número, y terminó en 23,90. Es una referencia útil para el trader — cuánto
+  aire hay entre lo que pide el vendedor y dónde está la puja — así que la
+  pantalla del bot ahora la muestra.
 - **`H. Cierre` (17:00') es el límite duro del día, no la cuenta regresiva.**
   El listado no trae cuánto falta para el cierre blando: ese reloj no se ve
   desde afuera. La pantalla del bot dice "límite" y no "cierra" por eso.

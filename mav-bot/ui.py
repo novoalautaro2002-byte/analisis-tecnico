@@ -196,6 +196,8 @@ class Trabajador(threading.Thread):
             "cierre": (ficha.hora_cierre or None) if ficha else None,
             "cheques": ficha.cantidad_cheques if ficha else None,
             "agente_vdr": (ficha.agente_vdr or None) if ficha else None,
+            "tasa_vdr": (formatear_tasa(ficha.tasa_vdr)
+                         if ficha and ficha.tasa_vdr is not None else None),
             "mia": formatear_tasa(mia.tasa) if mia else None,
             "mejor_ajena": formatear_tasa(ajena.tasa) if ajena else None,
             "gano": bool(mia and (not ajena or mia.tasa < ajena.tasa)),

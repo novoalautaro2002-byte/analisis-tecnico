@@ -287,6 +287,10 @@ function pintarMirado(m) {
       <div><div class="k">Subasta</div><div class="v">${m.ident}</div></div>
       <div><div class="k">Tu tasa</div><div class="v">${m.mia||'—'}</div></div>
       <div><div class="k">Mejor ajena</div><div class="v">${m.mejor_ajena||'—'}</div></div>
+      ${m.tasa_vdr?`<div><div class="k">Vendedor</div>
+        <div class="v" style="color:var(--suave)">${esc(m.tasa_vdr)}${
+          m.agente_vdr?` <span style="font-size:12px">ag ${esc(m.agente_vdr)}</span>`:''
+        }</div></div>`:''}
       ${m.estado?`<div><div class="k">Estado</div><div class="v" style="font-size:15px;color:${
         activa?'var(--ok)':'var(--suave)'}">${esc(m.estado)}</div></div>`:''}
       ${m.segmento?`<div><div class="k">Segmento</div>
@@ -323,6 +327,8 @@ function tarjeta(s) {
       <div><div class="k">Tuya</div><div class="v" style="color:${
         s.gano?'var(--ok)':'var(--texto)'}">${s.mia||'—'}</div></div>
       <div><div class="k">Mejor ajena</div><div class="v">${s.mejor_ajena||'—'}</div></div>
+      ${s.tasa_vdr?`<div><div class="k">Vendedor</div><div class="v"
+        style="color:var(--suave)">${esc(s.tasa_vdr)}</div></div>`:''}
     </div>
     <div class="detalle">${esc(s.detalle)}</div>
     ${tablaOfertas(s.ofertas)}
