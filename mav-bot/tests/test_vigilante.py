@@ -432,6 +432,126 @@ class TestConfirmacion(unittest.TestCase):
         self.assertFalse(v.terminado)
 
 
+class TestEditarEnVivo(unittest.TestCase):
+    """Cambiar las condiciones sin sacar la subasta de la mesa.
+
+    Sacarla y volver a sumarla la dejaba sin defensa el rato que tardaba en
+    ponerse al día, y borraba la cuenta de recotizaciones.
+    """
+
+    def test_cambia_el_piso_sin_perder_la_cuenta(self):
+        s = SesionFalsa()
+        m = Mesa(s, Log())
+        v = m.sumar(config(), vivo=True)
+        v.estado.registrar(IDENT, 1000.0)
+        v.estado.registrar(IDENT, 1001.0)
+        m.reconfigurar(config(piso=Decimal("26.50")))
+        self.assertIs(m.vigilantes[IDENT], v, "no se reemplaza el vigilante")
+        self.assertEqual(v.cfg.piso, Decimal("26.50"))
+        self.assertEqual(v.estado.recotizaciones[IDENT], 2)
+
+    def test_el_piso_nuevo_manda_enseguida(self):
+        s = SesionFalsa()
+        m = Mesa(s, Log())
+        v = m.sumar(config(), vivo=True)          # mia 27,00 ajena 26,99
+        m.reconfigurar(config(piso=Decimal("26.99")))
+        m.tick(1000.0)
+        self.assertIs(v.fase, Fase.CEDIDO)
+        self.assertEqual(s.posts, [])
+
+    def test_no_acepta_la_config_de_otra_subasta(self):
+        v = Vigilante(config(), SesionFalsa(), vivo=False, log=Log())
+        with self.assertRaises(ErrorDePlataforma):
+            v.reconfigurar(config(ident=999))
+        self.assertEqual(v.cfg.ident, IDENT)
+
+    def test_una_subasta_que_no_esta_lo_dice_claro(self):
+        m = Mesa(SesionFalsa(), Log())
+        with self.assertRaises(ErrorDePlataforma):
+            m.reconfigurar(config())
+        with self.assertRaises(ErrorDePlataforma):
+            m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+
+    def test_una_espera_agendada_se_descarta(self):
+        # Estaba calculada con la config vieja: sostenerla seria cumplir una
+        # orden que el trader acaba de cambiar.
+        s = SesionFalsa()
+        m = Mesa(s, Log())
+        v = m.sumar(config(espera_min_s=60, espera_max_s=60), vivo=True)
+        v.tick(1000.0)
+        self.assertIsNotNone(v.cotizar_en_s)
+        m.reconfigurar(config())
+        self.assertIsNone(v.cotizar_en_s)
+
+
+class TestTasaAMano(unittest.TestCase):
+    """El trader carga su tasa desde la pantalla del bot, sin abrir MAV."""
+
+    def mesa(self, vivo=True, **kw):
+        s = SesionFalsa()
+        m = Mesa(s, Log())
+        m.sumar(config(**kw), vivo=vivo)
+        return s, m
+
+    def test_manda_la_tasa_del_trader(self):
+        s, m = self.mesa()
+        m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        self.assertEqual(len(s.posts), 1)
+        self.assertEqual(s.posts[0]["tasa"], "23,50")
+
+    def test_lleva_el_comitente_como_cualquier_orden(self):
+        # Mismo camino que las del bot: copiar, no escribir.
+        s, m = self.mesa()
+        m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        self.assertTrue(any(k.startswith("comitcpr") and v
+                            for k, v in s.posts[0].items()))
+
+    def test_despues_sigue_defendiendo(self):
+        s, m = self.mesa()
+        m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        v = m.vigilantes[IDENT]
+        self.assertIs(v.fase, Fase.CONFIRMANDO)
+        for i in range(1, 8):
+            v.tick(1000.0 + i * 0.5)
+        self.assertFalse(v.terminado, "la sigue cuidando")
+
+    def test_en_sombra_no_manda_nada(self):
+        # "Sombra" significa que de ahi no sale una orden. Una excepcion
+        # vuelve inutil la garantia.
+        s, m = self.mesa(vivo=False)
+        with self.assertRaises(ErrorDePlataforma):
+            m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        self.assertEqual(s.posts, [])
+
+    def test_no_crea_una_oferta_donde_no_tenias(self):
+        # El comitente lo elige el trader en MAV. Esa regla sostiene el diseno.
+        s = SesionFalsa(paginas={IDENT: pantalla([ajena("26,99")])})
+        m = Mesa(s, Log())
+        m.sumar(config(), vivo=True)
+        with self.assertRaises(ErrorDePlataforma):
+            m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        self.assertEqual(s.posts, [])
+
+    def test_una_tasa_absurda_no_sale(self):
+        # 2390 en vez de 23,90 es el error de tipeo de siempre.
+        s, m = self.mesa()
+        with self.assertRaises(ErrorDePlataforma):
+            m.cargar_a_mano(IDENT, Decimal("2390"), 1000.0)
+        self.assertEqual(s.posts, [])
+
+    def test_en_una_subasta_terminada_tampoco(self):
+        s, m = self.mesa()
+        m.vigilantes[IDENT].parar("de prueba")
+        with self.assertRaises(ErrorDePlataforma):
+            m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+
+    def test_no_cuenta_como_recotizacion_del_bot(self):
+        # El tope es un freno anti-loop del bot, no de lo que hace el trader.
+        s, m = self.mesa()
+        m.cargar_a_mano(IDENT, Decimal("23.50"), 1000.0)
+        self.assertEqual(m.vigilantes[IDENT].estado.recotizaciones.get(IDENT, 0), 0)
+
+
 class TestRadar(unittest.TestCase):
     """El tablero ahorra lecturas, pero nunca decide una oferta.
 

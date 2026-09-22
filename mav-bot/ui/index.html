@@ -65,6 +65,9 @@
   .log .cotizando,.log .verificacion{color:var(--ok)}
   .log .bloqueado,.log .fase,.log .red{color:var(--alerta)}
   .log .libro_ilegible,.log .cotizacion_dudosa{color:var(--peligro)}
+  .editor{background:var(--panel2);border:1px solid var(--borde);border-radius:9px;
+          padding:11px;margin:9px 0}
+  .editor .campo{flex:0 0 88px}
   .nota{font-size:12px;color:var(--suave);margin:9px 0 0}
   .vacio{color:var(--tenue);font-style:italic}
   /* tarjetas de subasta */
@@ -321,6 +324,7 @@ function tarjeta(s) {
       <span class="tag">${esc(s.fase)}</span>
       ${s.estado?`<span class="tag">${esc(s.estado)}</span>`:''}
       <span style="flex:1"></span>
+      <button class="neutro chico" onclick="abrirPanel(${s.ident})">editar</button>
       <button class="neutro chico" onclick="pedir('/api/sacar',{ident:${s.ident}})">quitar</button>
     </header>
     <div class="tasas">
@@ -331,10 +335,93 @@ function tarjeta(s) {
         style="color:var(--suave)">${esc(s.tasa_vdr)}</div></div>`:''}
     </div>
     <div class="detalle">${esc(s.detalle)}</div>
+    ${panel(s)}
     ${tablaOfertas(s.ofertas)}
     <footer><span>${s.recotizaciones} movimiento(s)${falta}</span>${
       reloj?`<span class="reloj">${reloj}</span>`:''}</footer>
   </div>`;
+}
+
+// --- editar una subasta sin sacarla ----------------------------------------
+//
+// El panel vive abierto por subasta y se repinta cada segundo con el resto de
+// la pantalla. Por eso lo que el trader está tipeando se guarda en `tocado`:
+// si no, cada refresco le borraría lo que escribió a medias.
+
+let abierto = null;          // ident del panel abierto, o null
+let tocado = {};             // lo que el trader escribió y todavía no guardó
+
+function abrirPanel(ident) {
+  abierto = (abierto === ident) ? null : ident;
+  tocado = {};
+  refrescar();
+}
+
+function anotar(campo, valor) { tocado[campo] = valor; }
+
+const CAMPOS = [
+  ['piso', 'Piso'], ['decremento_min', 'Baja mín.'], ['decremento_max', 'Baja máx.'],
+  ['espera_min', 'Mueve en mín. s'], ['espera_max', 'Mueve en máx. s'],
+  ['sondeo', 'Mira cada s'], ['prob', 'Prob.'], ['max_recotizaciones', 'Máx. rec.'],
+];
+
+function panel(s) {
+  if (abierto !== s.ident || !s.cfg) return '';
+  const val = k => esc(tocado[k] !== undefined ? tocado[k] : (s.cfg[k] ?? ''));
+  return `<div class="editor">
+    <div class="fila">
+      ${CAMPOS.map(([k, t]) => `<div class="campo"><label>${t}</label>
+        <input value="${val(k)}" oninput="anotar('${k}',this.value)"></div>`).join('')}
+    </div>
+    <div class="fila" style="margin-top:9px">
+      <button onclick="guardar(${s.ident})">Guardar condiciones</button>
+      <button class="neutro" onclick="abrirPanel(${s.ident})">cancelar</button>
+      <span style="flex:1"></span>
+      <div class="campo"><label>Cargar tu tasa</label>
+        <input id="manual-${s.ident}" placeholder="${esc(s.mia || '23,90')}"></div>
+      <button class="peligro" onclick="cargarTasa(${s.ident})"
+        title="Manda tu tasa a MAV por el mismo camino que usa el bot. Después el bot sigue defendiendo desde ahí.">Cargar</button>
+    </div>
+    <p class="nota">Cambiar las condiciones no saca la subasta: el bot sigue
+      mirando y no pierde la cuenta. <b>Cargar tu tasa</b> manda una orden real
+      — el bot no crea ofertas nuevas, solo cambia la que ya pusiste en MAV.</p>
+  </div>`;
+}
+
+function guardar(ident) {
+  const s = (ultimo.subastas || []).find(x => x.ident === ident);
+  if (!s) return;
+  const p = {...s.cfg, ...tocado, ident};
+  if (!p.piso) { avisoLocal = 'Falta el piso.'; return refrescar(); }
+  if (p.piso !== s.cfg.piso && s.vivo &&
+      !confirm(`Subasta ${ident} en VIVO.\n\nPiso: ${s.cfg.piso} → ${p.piso}\n\n`
+               + 'El piso es el precio al que vas a comprar si alguien empuja.\n\n¿Seguro?'))
+    return;
+  avisoLocal = null;
+  abierto = null; tocado = {};
+  pedir('/api/editar', p);
+}
+
+function cargarTasa(ident) {
+  const s = (ultimo.subastas || []).find(x => x.ident === ident);
+  const tasa = ($('manual-' + ident).value || '').trim();
+  if (!tasa) { avisoLocal = 'Escribí la tasa que querés cargar.'; return refrescar(); }
+  let extra = '';
+  if (s && s.cfg && cmpTasa(tasa, s.cfg.piso) < 0)
+    extra = `\n\nOJO: ${tasa} está POR DEBAJO de tu piso ${s.cfg.piso}.`;
+  if (!confirm(`ORDEN REAL en la subasta ${ident}.\n\nTu tasa: ${tasa}${extra}\n\n`
+               + '¿Seguro?')) return;
+  avisoLocal = null;
+  abierto = null; tocado = {};
+  pedir('/api/manual', {ident, tasa});
+}
+
+// Las tasas vienen con coma decimal, así que comparar como texto miente:
+// "9,00" > "23,00". Se comparan como números.
+function cmpTasa(a, b) {
+  const n = t => parseFloat(String(t).replace('.', '').replace(',', '.'));
+  const x = n(a), y = n(b);
+  return (isNaN(x) || isNaN(y)) ? 0 : (x - y);
 }
 
 function pintarLog(lineas) {
@@ -354,6 +441,7 @@ function pintarLog(lineas) {
 // a resolver. Así que avisa, y avisa SOLO cuando hace falta algo tuyo. Una
 // recotización no es noticia; que se haya frenado, sí.
 
+let ultimo = {};             // el último estado servido
 let fasesVistas = {};        // ident -> última fase que ya avisamos
 let sesionVista = null;
 
@@ -436,6 +524,7 @@ async function refrescar() {
   $('paso-login').hidden = e.sesion;
   $('panel-sesion').hidden = e.sesion && !campoPendiente;
 
+  ultimo = e;
   const subs = e.subastas || [];
   const activas = subs.filter(s => !['cedido','cerrada','detenido'].includes(s.fase));
   $('chip-mesa').hidden = !subs.length;

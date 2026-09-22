@@ -122,6 +122,10 @@ class Trabajador(threading.Thread):
             self._mirar(int(datos.get("ident") or 0))
         elif orden == "sumar":
             self._sumar(datos)
+        elif orden == "editar":
+            self._editar(datos)
+        elif orden == "manual":
+            self._manual(datos)
         elif orden == "sacar":
             self._exige_mesa().sacar(int(datos["ident"]))
         elif orden == "parar":
@@ -210,7 +214,11 @@ class Trabajador(threading.Thread):
 
     def _sumar(self, datos: dict) -> None:
         mesa = self._exige_mesa()
-        cfg = ConfigSubasta(
+        mesa.sumar(self._armar_config(datos), vivo=bool(datos.get("vivo")))
+        self._set(aviso=None)
+
+    def _armar_config(self, datos: dict) -> ConfigSubasta:
+        return ConfigSubasta(
             ident=int(datos["ident"]),
             mi_agente=self._exige_agente(),
             piso=parsear_tasa(datos["piso"]),
@@ -222,8 +230,23 @@ class Trabajador(threading.Thread):
             sondeo_s=float(datos["sondeo"]),
             max_recotizaciones=int(datos["max_recotizaciones"]),
         )
-        mesa.sumar(cfg, vivo=bool(datos.get("vivo")))
-        self._set(aviso=None)
+
+    def _editar(self, datos: dict) -> None:
+        """Cambia las condiciones sin sacar la subasta de la mesa.
+
+        Sacar y volver a sumar dejaba a la subasta sin defensa el rato que
+        tardaba en ponerse al día, y borraba la cuenta de recotizaciones.
+        """
+        mesa = self._exige_mesa()
+        mesa.reconfigurar(self._armar_config(datos))
+        self._set(aviso=f"Subasta {datos['ident']}: condiciones cambiadas.")
+
+    def _manual(self, datos: dict) -> None:
+        """Una tasa puesta por el trader, mandada por el camino del bot."""
+        mesa = self._exige_mesa()
+        ident = int(datos["ident"])
+        texto = mesa.cargar_a_mano(ident, parsear_tasa(datos["tasa"]))
+        self._set(aviso=f"Subasta {ident}: cargada tu tasa {texto}.")
 
     # -- diagnóstico -------------------------------------------------------
 
@@ -335,6 +358,7 @@ class Handler(BaseHTTPRequestHandler):
         orden = {"/api/ingresar": "ingresar", "/api/codigo": "codigo",
                  "/api/mirar": "mirar", "/api/sumar": "sumar",
                  "/api/sacar": "sacar", "/api/parar": "parar",
+                 "/api/editar": "editar", "/api/manual": "manual",
                  "/api/agente": "agente",
                  "/api/diagnostico": "diagnostico"}.get(self.path)
         if orden is None:

@@ -98,6 +98,7 @@ class Vista:
     cheques: int | None = None
     agente_vdr: str | None = None
     tasa_vdr: str | None = None   # la que cargo el vendedor: el techo de la puja
+    cfg: dict = field(default_factory=dict)   # para poder editarla en pantalla
 
 
 class Vigilante:
@@ -150,6 +151,78 @@ class Vigilante:
 
     def listo_para(self, ahora_s: float) -> bool:
         return ahora_s >= self.proxima_s
+
+    def reconfigurar(self, cfg: ConfigSubasta) -> None:
+        """Cambia las condiciones sin perder de vista la subasta.
+
+        No se reemplaza el vigilante: se le cambia la orden. Así no se pierde la
+        cuenta de recotizaciones, ni el libro leído, ni lo aprendido del
+        tablero. Sacar y volver a sumar dejaba a la subasta sin defensa el rato
+        que tardaba en ponerse al día.
+        """
+        if cfg.ident != self.cfg.ident:
+            raise ErrorDePlataforma(
+                f"esta config es de la subasta {cfg.ident}, no de la {self.cfg.ident}")
+        antes, self.cfg = self.cfg, cfg
+        self.log("reconfig",
+                 f"[{cfg.ident}] piso {antes.piso} → {cfg.piso}, "
+                 f"mira cada {cfg.sondeo_s:g}s, mueve en "
+                 f"{cfg.espera_min_s:g}-{cfg.espera_max_s:g}s")
+        # Lo que estaba agendado se calculó con la config vieja.
+        self.cotizar_en_s = None
+        self.tasa_pendiente = None
+        self._huella_leida = None
+
+    def cargar_a_mano(self, tasa: Decimal, ahora_s: float) -> str:
+        """Una tasa que pone el trader, por el mismo camino que las del bot.
+
+        Existe para no tener que abrir MAV cuando querés pegar un salto que el
+        bot no daría — bajar veinte centavos de una en vez de ir de a uno.
+
+        Tres cosas que NO hace, a propósito:
+
+        * no crea una oferta donde no tenías: el comitente lo elegís vos en MAV,
+          y esa regla es la que sostiene todo el diseño;
+        * no manda nada en modo sombra, porque "sombra" significa que de acá no
+          sale una orden, y una excepción vuelve inútil la garantía;
+        * no frena al bot: después de cargarla, sigue defendiendo desde ahí.
+        """
+        if self.terminado:
+            raise ErrorDePlataforma(
+                f"la subasta está {self.fase.value}: {self.detalle}")
+        if not self.vivo:
+            raise ErrorDePlataforma(
+                "esta subasta está en SOMBRA y de ahí no sale ninguna orden. "
+                "Pasala a VIVO si querés cargar la tasa.")
+        # Contra el dedo: 2390 en vez de 23,90 es el error de tipeo de siempre.
+        if not (self.cfg.tasa_min_absoluta <= tasa <= self.cfg.tasa_max_absoluta):
+            raise ErrorDePlataforma(
+                f"la tasa {tasa} cae fuera de la banda plausible "
+                f"[{self.cfg.tasa_min_absoluta}, {self.cfg.tasa_max_absoluta}]")
+
+        libro = self._leer(ahora_s)
+        if libro.mejor_propia() is None:
+            raise ErrorDePlataforma(
+                "no tenés ninguna oferta en esta subasta. La primera, con su "
+                "comitente, se carga en MAV.")
+
+        texto = formatear_tasa(tasa)
+        payload = armar_oferta(self._html, self.sesion.cheques(self.cfg.ident),
+                               texto)
+        self.log("manual", f"[{self.cfg.ident}] cargás a mano {texto}", tasa=texto)
+        try:
+            self.sesion.postear("cpd-versubasta.r", payload.pares(),
+                                referer_ident=self.cfg.ident)
+        except ErrorDePlataforma as e:
+            self.log("cotizacion_dudosa", f"[{self.cfg.ident}] no sé si entró: {e}")
+
+        # Se confirma igual que una del bot, y desde ahí sigue defendiendo.
+        self._huella_leida = None
+        self.confirmar = (tasa, ahora_s + VENTANA_CONFIRMACION_S,
+                          len(libro.propias))
+        self._fase(Fase.CONFIRMANDO, f"cargaste {texto} a mano; la confirmo")
+        self.proxima_s = ahora_s + REINTENTO_CONFIRMACION_S
+        return texto
 
     def recibir_ficha(self, fila: dict, ahora_s: float) -> None:
         """La mesa reparte lo que trajo el tablero. Un pedido para todas."""
@@ -457,4 +530,14 @@ class Vigilante:
             agente_vdr=self.ficha.agente_vdr if self.ficha else None,
             tasa_vdr=(formatear_tasa(self.ficha.tasa_vdr)
                       if self.ficha and self.ficha.tasa_vdr is not None else None),
+            cfg={
+                "piso": formatear_tasa(self.cfg.piso),
+                "decremento_min": formatear_tasa(self.cfg.decremento_min),
+                "decremento_max": formatear_tasa(self.cfg.decremento_max),
+                "espera_min": f"{self.cfg.espera_min_s:g}",
+                "espera_max": f"{self.cfg.espera_max_s:g}",
+                "sondeo": f"{self.cfg.sondeo_s:g}",
+                "prob": f"{self.cfg.prob_respuesta:g}",
+                "max_recotizaciones": str(self.cfg.max_recotizaciones),
+            },
         )

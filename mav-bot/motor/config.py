@@ -103,20 +103,31 @@ class ConfigSubasta:
                 f"el piso {self.piso} cae fuera de la banda plausible "
                 f"[{self.tasa_min_absoluta}, {self.tasa_max_absoluta}]"
             )
+        # Los mensajes hablan como la pantalla, no como el codigo: el que los
+        # lee esta operando, y un "decremento_max" no le dice donde tocar.
         if self.decremento_min < PASO:
-            raise ConfigInvalida(f"el decremento minimo no puede ser menor a {PASO}")
+            raise ConfigInvalida(
+                f"la baja minima no puede ser menor a {PASO} (un centavo)")
         if self.decremento_max < self.decremento_min:
-            raise ConfigInvalida("decremento_max no puede ser menor que decremento_min")
+            raise ConfigInvalida(
+                f"la baja maxima ({self.decremento_max}) no puede ser menor que "
+                f"la minima ({self.decremento_min})")
         if not (0.0 < self.prob_respuesta <= 1.0):
-            raise ConfigInvalida("prob_respuesta tiene que estar en (0, 1]")
-        if self.espera_min_s < 0 or self.espera_max_s < self.espera_min_s:
-            raise ConfigInvalida("la ventana de espera es invalida")
+            raise ConfigInvalida(
+                "la probabilidad tiene que estar entre 0 y 1 (1 = contesta siempre)")
+        if self.espera_min_s < 0:
+            raise ConfigInvalida("el tiempo que tarda en mover no puede ser negativo")
+        if self.espera_max_s < self.espera_min_s:
+            raise ConfigInvalida(
+                f"tarda en mover: el maximo ({self.espera_max_s:g}s) no puede ser "
+                f"menor que el minimo ({self.espera_min_s:g}s). Subi el maximo.")
         if self.max_recotizaciones <= 0:
             raise ConfigInvalida("max_recotizaciones tiene que ser positivo")
         if self.intervalo_min_s < 0:
             raise ConfigInvalida("intervalo_min_s no puede ser negativo")
         if self.sondeo_s < PISO_SONDEO_S:
             raise ConfigInvalida(
-                f"el sondeo no puede bajar de {PISO_SONDEO_S}s")
+                f"mirar mas seguido que cada {PISO_SONDEO_S:g}s no trae nada nuevo: "
+                f"el servidor no actualiza mas rapido")
         if self.antiguedad_max_libro_s <= 0:
             raise ConfigInvalida("antiguedad_max_libro_s tiene que ser positivo")

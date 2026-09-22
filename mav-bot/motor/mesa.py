@@ -54,6 +54,21 @@ class Mesa:
                          f"{'VIVO' if vivo else 'SOMBRA'}")
         return v
 
+    def reconfigurar(self, cfg: ConfigSubasta) -> None:
+        """Cambia las condiciones de una subasta que ya está vigilada."""
+        v = self.vigilantes.get(cfg.ident)
+        if v is None:
+            raise ErrorDePlataforma(
+                f"la subasta {cfg.ident} no está en la mesa")
+        v.reconfigurar(cfg)
+
+    def cargar_a_mano(self, ident: int, tasa, ahora_s: float | None = None) -> str:
+        v = self.vigilantes.get(ident)
+        if v is None:
+            raise ErrorDePlataforma(f"la subasta {ident} no está en la mesa")
+        return v.cargar_a_mano(
+            tasa, reloj.monotonic() if ahora_s is None else ahora_s)
+
     def sacar(self, ident: int, motivo: str = "sacada a mano") -> None:
         v = self.vigilantes.pop(ident, None)
         if v is not None:
